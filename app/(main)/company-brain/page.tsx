@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useRef } from "react";
-import { Brain, MessageSquare, Inbox, Upload, FileUp, X } from "lucide-react";
+import { useState, useRef, useCallback } from "react";
+import { Brain, MessageSquare, Inbox, Upload, FileUp, X, Loader2 } from "lucide-react";
 import PageHeader from "@/components/common/page-header";
 import PageLayout from "@/components/common/page-layout";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -32,6 +32,7 @@ export default function CompanyBrainPage() {
   const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [isDragging, setIsDragging] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileSelect = (files: FileList | null) => {
@@ -67,27 +68,96 @@ export default function CompanyBrainPage() {
     setIsUploadDialogOpen(false);
   };
 
-  const handleSendMessage = (text: string) => {
-    const newMessage: Message = {
+  const handleSendMessage = useCallback(async (text: string, model: string) => {
+    const userMessage: Message = {
       id: crypto.randomUUID(),
       text,
       sender: "user",
       timestamp: new Date(),
     };
-    setMessages((prev) => [...prev, newMessage]);
+    
+    setMessages((prev) => [...prev, userMessage]);
+    setIsLoading(true);
 
-    // TODO: Integrate with AI backend
-    // For now, add a placeholder AI response
-    setTimeout(() => {
-      const aiResponse: Message = {
-        id: crypto.randomUUID(),
-        text: "This is a placeholder response. AI integration coming soon!",
-        sender: "ai",
-        timestamp: new Date(),
-      };
-      setMessages((prev) => [...prev, aiResponse]);
-    }, 1000);
-  };
+    // Create AI message placeholder
+    const aiMessageId = crypto.randomUUID();
+    const aiMessage: Message = {
+      id: aiMessageId,
+      text: "",
+      sender: "ai",
+      timestamp: new Date(),
+    };
+    setMessages((prev) => [...prev, aiMessage]);
+
+    try {
+      // Prepare messages for API (only user and AI messages)
+      const apiMessages = [...messages, userMessage].map((msg) => ({
+        sender: msg.sender === "user" ? "user" : "assistant",
+        text: msg.text,
+      }));
+
+      const response = await fetch("/api/chat", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          messages: apiMessages,
+          model: model,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to get response from AI");
+      }
+
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+
+      if (!reader) {
+        throw new Error("No response stream available");
+      }
+
+      let accumulatedText = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value);
+        const lines = chunk.split("\n").filter((line) => line.trim());
+
+        for (const line of lines) {
+          try {
+            const data = JSON.parse(line);
+            if (data.text) {
+              accumulatedText += data.text;
+              setMessages((prev) =>
+                prev.map((msg) =>
+                  msg.id === aiMessageId
+                    ? { ...msg, text: accumulatedText }
+                    : msg
+                )
+              );
+            }
+          } catch {
+            // Skip invalid JSON lines
+          }
+        }
+      }
+    } catch (error) {
+      console.error("Error sending message:", error);
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === aiMessageId
+            ? { ...msg, text: "Sorry, I encountered an error. Please try again." }
+            : msg
+        )
+      );
+    } finally {
+      setIsLoading(false);
+    }
+  }, [messages]);
 
   return (
     <>
@@ -145,13 +215,22 @@ export default function CompanyBrainPage() {
                               : "bg-muted"
                           }`}
                         >
-                          <p className="text-sm">{message.text}</p>
-                          <span className="text-xs opacity-70 mt-1 block">
-                            {message.timestamp.toLocaleTimeString([], {
-                              hour: "2-digit",
-                              minute: "2-digit",
-                            })}
-                          </span>
+                          {message.sender === "ai" && message.text === "" ? (
+                            <div className="flex items-center gap-2">
+                              <Loader2 className="size-4 animate-spin" />
+                              <span className="text-sm text-muted-foreground">Thinking...</span>
+                            </div>
+                          ) : (
+                            <p className="text-sm whitespace-pre-wrap">{message.text}</p>
+                          )}
+                          {message.text !== "" && (
+                            <span className="text-xs opacity-70 mt-1 block">
+                              {message.timestamp.toLocaleTimeString([], {
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              })}
+                            </span>
+                          )}
                         </div>
                       </div>
                     ))}
@@ -160,7 +239,7 @@ export default function CompanyBrainPage() {
               </ScrollArea>
 
               {/* Chat Input */}
-              <ChatInput onSendMessage={handleSendMessage} />
+              <ChatInput onSendMessage={handleSendMessage} disabled={isLoading} />
             </div>
           </TabsContent>
 

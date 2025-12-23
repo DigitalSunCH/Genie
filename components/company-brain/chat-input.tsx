@@ -25,22 +25,22 @@ import {
 
 const AI_MODELS = [
   {
-    id: "gpt-4o",
-    name: "GPT-4o",
-    description: "Most capable, best for complex tasks",
+    id: "claude-opus-4-20250514",
+    name: "Claude Opus 4.5",
+    description: "Most intelligent, best for complex tasks",
+    icon: Brain,
+  },
+  {
+    id: "claude-sonnet-4-20250514",
+    name: "Claude Sonnet 4",
+    description: "Great balance of speed and intelligence",
     icon: Sparkles,
   },
   {
-    id: "gpt-4o-mini",
-    name: "GPT-4o Mini",
-    description: "Fast and efficient for simple tasks",
+    id: "gpt-4o",
+    name: "GPT-4o",
+    description: "OpenAI's most capable model",
     icon: Zap,
-  },
-  {
-    id: "claude-sonnet",
-    name: "Claude Sonnet",
-    description: "Great for analysis and writing",
-    icon: Brain,
   },
 ] as const;
 
@@ -76,7 +76,7 @@ type ToolId = (typeof TOOLS)[number]["id"];
 
 interface ChatInputProps {
   className?: string;
-  onSendMessage?: (message: string) => void;
+  onSendMessage?: (message: string, model: string) => void;
   disabled?: boolean;
 }
 
@@ -86,7 +86,7 @@ export function ChatInput({
   disabled = false,
 }: ChatInputProps) {
   const [message, setMessage] = useState("");
-  const [selectedModel, setSelectedModel] = useState<AIModelId>("gpt-4o");
+  const [selectedModel, setSelectedModel] = useState<AIModelId>("claude-opus-4-20250514");
   const [selectedTools, setSelectedTools] = useState<ToolId[]>([]);
   const [isModelPopoverOpen, setIsModelPopoverOpen] = useState(false);
   const [isToolPopoverOpen, setIsToolPopoverOpen] = useState(false);
@@ -96,7 +96,7 @@ export function ChatInput({
 
   const handleSend = () => {
     if (message.trim() && !disabled) {
-      onSendMessage?.(message.trim());
+      onSendMessage?.(message.trim(), selectedModel);
       setMessage("");
     }
   };
