@@ -25,9 +25,10 @@ export default function RootLayout({
 }>) {
   return (
     <ClerkProvider>
-      <html lang="de" className="dark">
+      <html lang="de" className="dark" suppressHydrationWarning>
         <body
           className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+          suppressHydrationWarning
         >
           {children}
         </body>
