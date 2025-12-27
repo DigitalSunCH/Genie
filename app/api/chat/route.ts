@@ -18,7 +18,7 @@ export async function POST(request: Request) {
 
     // Convert messages to Anthropic format
     const anthropicMessages = messages.map((msg: { sender: string; text: string }) => ({
-      role: msg.sender === "user" ? "user" : "assistant",
+      role: (msg.sender === "user" ? "user" : "assistant") as "user" | "assistant",
       content: msg.text,
     }));
 
