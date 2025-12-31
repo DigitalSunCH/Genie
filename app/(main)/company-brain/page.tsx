@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
-import { Brain, MessageSquare, Inbox, Upload, FileUp, X, Loader2 } from "lucide-react";
+import { useState, useRef, useCallback, useEffect } from "react";
+import { useUser } from "@clerk/nextjs";
+import { Brain, MessageSquare, Inbox, Upload, FileUp, X, Loader2, PanelLeftClose, PanelLeft } from "lucide-react";
 import PageHeader from "@/components/common/page-header";
 import PageLayout from "@/components/common/page-layout";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -19,21 +20,203 @@ import {
 } from "@/components/ui/dialog";
 import { ChatInput } from "@/components/company-brain/chat-input";
 import { ApprovalCardStack } from "@/components/company-brain/approval-card-stack";
+import { MarkdownContent } from "@/components/company-brain/markdown-content";
+import { ThreadList } from "@/components/company-brain/thread-list";
+import { supabase } from "@/lib/supabaseClient";
+import { Thread, DbMessage } from "@/lib/types/database";
 
 interface Message {
   id: string;
+  dbId?: number; // ID from database
   text: string;
   sender: "user" | "ai";
   timestamp: Date;
 }
 
 export default function CompanyBrainPage() {
+  const { user, isLoaded: isUserLoaded } = useUser();
+  const [threads, setThreads] = useState<Thread[]>([]);
+  const [activeThread, setActiveThread] = useState<Thread | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isLoadingThreads, setIsLoadingThreads] = useState(true);
+  const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Load threads from Supabase when user is loaded
+  useEffect(() => {
+    if (isUserLoaded && user) {
+      loadThreads();
+    }
+  }, [isUserLoaded, user]);
+
+  const loadThreads = async () => {
+    if (!user) return;
+    
+    setIsLoadingThreads(true);
+    try {
+      const { data, error } = await supabase
+        .from("threads")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false });
+
+      if (error) throw error;
+      setThreads(data || []);
+    } catch (error) {
+      console.error("Error loading threads:", error);
+    } finally {
+      setIsLoadingThreads(false);
+    }
+  };
+
+  const loadMessages = async (thread: Thread) => {
+    if (!user) return;
+    
+    setIsLoadingMessages(true);
+    try {
+      const { data, error } = await supabase
+        .from("messages")
+        .select("*")
+        .eq("thread_id", thread.id)
+        .order("created_at", { ascending: true });
+
+      if (error) throw error;
+
+      const loadedMessages: Message[] = (data || []).map((msg: DbMessage) => ({
+        id: crypto.randomUUID(),
+        dbId: msg.id,
+        text: msg.content,
+        sender: msg.role === "user" ? "user" : "ai",
+        timestamp: new Date(msg.created_at),
+      }));
+
+      setMessages(loadedMessages);
+    } catch (error) {
+      console.error("Error loading messages:", error);
+    } finally {
+      setIsLoadingMessages(false);
+    }
+  };
+
+  const saveMessage = async (threadId: number, role: "user" | "assistant", content: string) => {
+    if (!user) return null;
+
+    try {
+      const { data, error } = await supabase
+        .from("messages")
+        .insert({
+          thread_id: threadId,
+          role,
+          content,
+          user_id: user.id,
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+      return data;
+    } catch (error) {
+      console.error("Error saving message:", error);
+      return null;
+    }
+  };
+
+  const handleCreateThread = async () => {
+    if (!user) return;
+    
+    const newThreadId = crypto.randomUUID();
+    
+    try {
+      const { data, error } = await supabase
+        .from("threads")
+        .insert({
+          thread_id: newThreadId,
+          name: "Neuer Chat",
+          user_id: user.id,
+        })
+        .select()
+        .single();
+
+      if (error) {
+        console.error("Supabase error:", error.message, error.details, error.hint);
+        throw error;
+      }
+      
+      setThreads((prev) => [data, ...prev]);
+      setActiveThread(data);
+      setMessages([]);
+    } catch (error) {
+      console.error("Error creating thread:", error);
+    }
+  };
+
+  const handleSelectThread = async (threadId: string) => {
+    const thread = threads.find((t) => t.thread_id === threadId);
+    if (!thread) return;
+
+    setActiveThread(thread);
+    await loadMessages(thread);
+  };
+
+  const handleRenameThread = async (threadId: string, newName: string) => {
+    try {
+      const { error } = await supabase
+        .from("threads")
+        .update({ name: newName })
+        .eq("thread_id", threadId);
+
+      if (error) throw error;
+
+      setThreads((prev) =>
+        prev.map((t) =>
+          t.thread_id === threadId ? { ...t, name: newName } : t
+        )
+      );
+
+      if (activeThread?.thread_id === threadId) {
+        setActiveThread((prev) => prev ? { ...prev, name: newName } : null);
+      }
+    } catch (error) {
+      console.error("Error renaming thread:", error);
+    }
+  };
+
+  const handleDeleteThread = async (threadId: string) => {
+    const thread = threads.find((t) => t.thread_id === threadId);
+    if (!thread) return;
+
+    try {
+      // First delete all messages in the thread
+      const { error: messagesError } = await supabase
+        .from("messages")
+        .delete()
+        .eq("thread_id", thread.id);
+
+      if (messagesError) throw messagesError;
+
+      // Then delete the thread
+      const { error } = await supabase
+        .from("threads")
+        .delete()
+        .eq("thread_id", threadId);
+
+      if (error) throw error;
+
+      setThreads((prev) => prev.filter((t) => t.thread_id !== threadId));
+
+      if (activeThread?.thread_id === threadId) {
+        setActiveThread(null);
+        setMessages([]);
+      }
+    } catch (error) {
+      console.error("Error deleting thread:", error);
+    }
+  };
 
   const handleFileSelect = (files: FileList | null) => {
     if (files) {
@@ -62,13 +245,43 @@ export default function CompanyBrainPage() {
   };
 
   const handleUpload = () => {
-    // TODO: Implement actual upload logic
     console.log("Uploading files:", selectedFiles);
     setSelectedFiles([]);
     setIsUploadDialogOpen(false);
   };
 
   const handleSendMessage = useCallback(async (text: string, model: string) => {
+    if (!user) return;
+    
+    let currentThread = activeThread;
+
+    // Create thread if none exists
+    if (!currentThread) {
+      const newThreadId = crypto.randomUUID();
+      
+      try {
+        const { data, error } = await supabase
+          .from("threads")
+          .insert({
+            thread_id: newThreadId,
+            name: text.slice(0, 50) + (text.length > 50 ? "..." : ""),
+            user_id: user.id,
+          })
+          .select()
+          .single();
+
+        if (error) throw error;
+        
+        currentThread = data;
+        setThreads((prev) => [data, ...prev]);
+        setActiveThread(data);
+      } catch (error) {
+        console.error("Error creating thread:", error);
+        return;
+      }
+    }
+
+    // Create and display user message
     const userMessage: Message = {
       id: crypto.randomUUID(),
       text,
@@ -78,6 +291,9 @@ export default function CompanyBrainPage() {
     
     setMessages((prev) => [...prev, userMessage]);
     setIsLoading(true);
+
+    // Save user message to Supabase
+    await saveMessage(currentThread.id, "user", text);
 
     // Create AI message placeholder
     const aiMessageId = crypto.randomUUID();
@@ -90,7 +306,6 @@ export default function CompanyBrainPage() {
     setMessages((prev) => [...prev, aiMessage]);
 
     try {
-      // Prepare messages for API (only user and AI messages)
       const apiMessages = [...messages, userMessage].map((msg) => ({
         sender: msg.sender === "user" ? "user" : "assistant",
         text: msg.text,
@@ -145,19 +360,29 @@ export default function CompanyBrainPage() {
           }
         }
       }
+
+      // Save AI response to Supabase after streaming is complete
+      if (accumulatedText && currentThread) {
+        await saveMessage(currentThread.id, "assistant", accumulatedText);
+      }
     } catch (error) {
       console.error("Error sending message:", error);
+      const errorText = "Sorry, I encountered an error. Please try again.";
       setMessages((prev) =>
         prev.map((msg) =>
           msg.id === aiMessageId
-            ? { ...msg, text: "Sorry, I encountered an error. Please try again." }
+            ? { ...msg, text: errorText }
             : msg
         )
       );
+      // Save error message to Supabase
+      if (currentThread) {
+        await saveMessage(currentThread.id, "assistant", errorText);
+      }
     } finally {
       setIsLoading(false);
     }
-  }, [messages]);
+  }, [messages, activeThread, user]);
 
   return (
     <>
@@ -181,65 +406,115 @@ export default function CompanyBrainPage() {
           </TabsList>
 
           <TabsContent value="chat" className="mt-4 flex-1 flex flex-col">
-            <div className="flex-1 flex flex-col rounded-lg border bg-card overflow-hidden">
-              {/* Messages Area */}
-              <ScrollArea className="flex-1 p-4">
-                {messages.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center h-full min-h-[300px] text-center">
-                    <div className="rounded-full bg-primary/10 p-4 mb-4">
-                      <Brain className="size-8 text-primary" />
+            <div className="flex-1 flex rounded-lg border bg-card overflow-hidden">
+              {/* Thread Sidebar */}
+              <div
+                className={`border-r bg-muted/30 transition-all duration-300 ${
+                  isSidebarOpen ? "w-64" : "w-0"
+                } overflow-hidden`}
+              >
+                {isSidebarOpen && (
+                  <ThreadList
+                    threads={threads}
+                    activeThreadId={activeThread?.thread_id || null}
+                    onSelectThread={handleSelectThread}
+                    onCreateThread={handleCreateThread}
+                    onRenameThread={handleRenameThread}
+                    onDeleteThread={handleDeleteThread}
+                  />
+                )}
+              </div>
+
+              {/* Chat Area */}
+              <div className="flex-1 flex flex-col">
+                {/* Sidebar Toggle */}
+                <div className="p-2 border-b flex items-center gap-2">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+                    className="size-8"
+                  >
+                    {isSidebarOpen ? (
+                      <PanelLeftClose className="size-4" />
+                    ) : (
+                      <PanelLeft className="size-4" />
+                    )}
+                  </Button>
+                  {activeThread && (
+                    <span className="text-sm text-muted-foreground">
+                      {activeThread.name || "Chat"}
+                    </span>
+                  )}
+                </div>
+
+                {/* Messages Area */}
+                <ScrollArea className="flex-1 p-4">
+                  {!isUserLoaded || isLoadingThreads || isLoadingMessages ? (
+                    <div className="flex flex-col items-center justify-center h-full min-h-[300px]">
+                      <Loader2 className="size-8 animate-spin text-muted-foreground" />
                     </div>
-                    <h3 className="text-lg font-semibold mb-2">Company Brain</h3>
-                    <p className="text-muted-foreground max-w-sm">
-                      Ask questions about your company&apos;s knowledge base and get instant answers.
-                    </p>
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    {messages.map((message) => (
-                      <div
-                        key={message.id}
-                        className={`flex items-start gap-3 ${
-                          message.sender === "user" ? "flex-row-reverse" : ""
-                        }`}
-                      >
-                        <Avatar className="size-8 shrink-0">
-                          <AvatarFallback className="text-xs">
-                            {message.sender === "user" ? "U" : "AI"}
-                          </AvatarFallback>
-                        </Avatar>
+                  ) : messages.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center h-full min-h-[300px] text-center">
+                      <div className="rounded-full bg-primary/10 p-4 mb-4">
+                        <Brain className="size-8 text-primary" />
+                      </div>
+                      <h3 className="text-lg font-semibold mb-2">Company Brain</h3>
+                      <p className="text-muted-foreground max-w-sm">
+                        {activeThread
+                          ? "Starte eine Konversation mit dem Company Brain."
+                          : "Wähle einen Chat aus oder starte einen neuen."}
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {messages.map((message) => (
                         <div
-                          className={`rounded-2xl px-4 py-2 max-w-[80%] ${
-                            message.sender === "user"
-                              ? "bg-primary text-primary-foreground"
-                              : "bg-muted"
+                          key={message.id}
+                          className={`flex items-start gap-3 ${
+                            message.sender === "user" ? "flex-row-reverse" : ""
                           }`}
                         >
-                          {message.sender === "ai" && message.text === "" ? (
-                            <div className="flex items-center gap-2">
-                              <Loader2 className="size-4 animate-spin" />
-                              <span className="text-sm text-muted-foreground">Thinking...</span>
-                            </div>
-                          ) : (
-                            <p className="text-sm whitespace-pre-wrap">{message.text}</p>
-                          )}
-                          {message.text !== "" && (
-                            <span className="text-xs opacity-70 mt-1 block">
-                              {message.timestamp.toLocaleTimeString([], {
-                                hour: "2-digit",
-                                minute: "2-digit",
-                              })}
-                            </span>
-                          )}
+                          <Avatar className="size-8 shrink-0">
+                            <AvatarFallback className="text-xs">
+                              {message.sender === "user" ? "U" : "AI"}
+                            </AvatarFallback>
+                          </Avatar>
+                          <div
+                            className={`rounded-2xl px-4 py-2 max-w-[80%] ${
+                              message.sender === "user"
+                                ? "bg-primary text-primary-foreground"
+                                : "bg-muted"
+                            }`}
+                          >
+                            {message.sender === "ai" && message.text === "" ? (
+                              <div className="flex items-center gap-2">
+                                <Loader2 className="size-4 animate-spin" />
+                                <span className="text-sm text-muted-foreground">Thinking...</span>
+                              </div>
+                            ) : message.sender === "ai" ? (
+                              <MarkdownContent content={message.text} />
+                            ) : (
+                              <p className="text-sm whitespace-pre-wrap">{message.text}</p>
+                            )}
+                            {message.text !== "" && (
+                              <span className="text-xs opacity-70 mt-1 block">
+                                {message.timestamp.toLocaleTimeString([], {
+                                  hour: "2-digit",
+                                  minute: "2-digit",
+                                })}
+                              </span>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </ScrollArea>
+                      ))}
+                    </div>
+                  )}
+                </ScrollArea>
 
-              {/* Chat Input */}
-              <ChatInput onSendMessage={handleSendMessage} disabled={isLoading} />
+                {/* Chat Input */}
+                <ChatInput onSendMessage={handleSendMessage} disabled={isLoading} />
+              </div>
             </div>
           </TabsContent>
 
