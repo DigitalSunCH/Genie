@@ -281,6 +281,9 @@ export default function CompanyBrainPage() {
       }
     }
 
+    // Safety check - should never happen but TypeScript needs it
+    if (!currentThread) return;
+
     // Create and display user message
     const userMessage: Message = {
       id: crypto.randomUUID(),
