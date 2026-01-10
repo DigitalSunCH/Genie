@@ -1,4 +1,4 @@
-import { LayoutDashboard } from "lucide-react";
+import { ChartNoAxesColumn } from "lucide-react";
 import PageHeader from "@/components/common/page-header";
 import PageLayout from "@/components/common/page-layout";
 
@@ -8,7 +8,7 @@ export default function DashboardPage() {
       <PageHeader
         titleUrl="/dashboard"
         title="Dashboard"
-        icon={<LayoutDashboard className="size-4" />}
+        icon={<ChartNoAxesColumn className="size-4" />}
       />
       <PageLayout>
         <div className="flex flex-col gap-4">
