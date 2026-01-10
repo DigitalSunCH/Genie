@@ -19,7 +19,13 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Thread } from "@/lib/types/database";
+
+export interface Thread {
+  id: number;
+  created_at: string;
+  thread_id: string;
+  name: string | null;
+}
 
 interface ThreadListProps {
   threads: Thread[];
@@ -202,4 +208,3 @@ export function ThreadList({
     </>
   );
 }
-
