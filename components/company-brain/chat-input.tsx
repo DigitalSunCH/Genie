@@ -124,7 +124,7 @@ export function ChatInput({
 
   return (
     <div
-      className={`sticky bottom-0 p-4 bg-card/95 backdrop-blur-sm ${className}`}
+      className={`sticky bottom-0 p-4 max-w-4xl mx-auto w-full ${className}`}
     >
       <div className="relative">
         <Textarea
@@ -132,7 +132,7 @@ export function ChatInput({
           onChange={(e) => setMessage(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder="Ask the Company Brain..."
-          className="pr-12 border-border min-h-12 max-h-32 rounded-2xl resize-none py-3 mt-0"
+          className="pr-12 border-border min-h-12 max-h-32 rounded-2xl resize-none py-3 mt-0 !bg-muted"
           disabled={disabled}
           style={{
             scrollbarWidth: "thin",
@@ -155,7 +155,7 @@ export function ChatInput({
       </div>
 
       {/* Action buttons below input */}
-      <div className="flex items-center gap-2 mt-2 flex-wrap">
+      <div className="flex items-center gap-2 mt-2 flex-wrap bg-muted rounded-full px-2 py-1 w-fit">
         {/* AI Model Selector */}
         <Popover open={isModelPopoverOpen} onOpenChange={setIsModelPopoverOpen}>
           <PopoverTrigger asChild>

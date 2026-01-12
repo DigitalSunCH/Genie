@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 
-const supabaseUrl = 'https://hagtpbpckhteicaomnnv.supabase.co'
+const supabaseUrl = 'https://kltkvqvlaklyrbjxffuk.supabase.co'
 
 // Admin Client für Server-only Operationen (mit Service Role Key)
 // NUR in API Routes, Server Actions, etc. verwenden!
