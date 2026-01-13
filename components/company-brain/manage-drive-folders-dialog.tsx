@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import Image from "next/image";
 import { Folder, Loader2, Trash2 } from "lucide-react";
 
 import {
@@ -13,19 +14,6 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-
-function GoogleDriveIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      viewBox="0 0 24 24"
-      fill="currentColor"
-      xmlns="http://www.w3.org/2000/svg"
-    >
-      <path d="M7.71 3.5L1.15 15l3.43 5.98L11.14 9.5 7.71 3.5zm1.14 0l6.86 12H22.3l-3.43-6-3.43-6H8.85zM8 15l-3.43 6h13.72l3.43-6H8z" />
-    </svg>
-  );
-}
 
 interface DriveFolder {
   id: string;
@@ -53,11 +41,11 @@ export function ManageDriveFoldersDialog({
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="outline" size="sm" className="rounded-full font-bold">
-          <GoogleDriveIcon className="size-4" />
+        <Button variant="outline" size="sm" className="rounded-full">
+          <Image src="/drive.png" alt="Google Drive" width={16} height={16} />
           {isLoading
             ? "Loading..."
-            : `${folderCount} folder${folderCount !== 1 ? "s" : ""}`}
+            : `${folderCount} Folder${folderCount !== 1 ? "s" : ""}`}
         </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-md">
@@ -89,8 +77,8 @@ export function ManageDriveFoldersDialog({
                     className="flex items-center justify-between rounded-md border bg-card p-3"
                   >
                     <div className="flex items-center gap-3">
-                      <div className="flex size-8 items-center justify-center rounded-md bg-primary/10">
-                        <Folder className="size-4 text-primary" />
+                      <div className="flex size-8 items-center justify-center rounded-md bg-muted">
+                        <Image src="/drive.png" alt="Google Drive" width={16} height={16} />
                       </div>
                       <div>
                         <div className="font-medium text-sm">{folder.name}</div>

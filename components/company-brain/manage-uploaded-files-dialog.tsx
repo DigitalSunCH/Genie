@@ -49,11 +49,11 @@ export function ManageUploadedFilesDialog({
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="outline" size="sm" className="rounded-full font-bold">
+        <Button variant="outline" size="sm" className="rounded-full">
           <Upload className="size-4" />
           {isLoading
             ? "Loading..."
-            : `${fileCount} file${fileCount !== 1 ? "s" : ""}`}
+            : `${fileCount} File${fileCount !== 1 ? "s" : ""}`}
         </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-md">

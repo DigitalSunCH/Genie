@@ -78,12 +78,14 @@ interface ChatInputProps {
   className?: string;
   onSendMessage?: (message: string, model: string) => void;
   disabled?: boolean;
+  large?: boolean;
 }
 
 export function ChatInput({
   className,
   onSendMessage,
   disabled = false,
+  large = false,
 }: ChatInputProps) {
   const [message, setMessage] = useState("");
   const [selectedModel, setSelectedModel] = useState<AIModelId>("claude-opus-4-20250514");
@@ -132,13 +134,15 @@ export function ChatInput({
           onChange={(e) => setMessage(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder="Ask the Company Brain..."
-          className="pr-12 border-border min-h-12 max-h-32 rounded-2xl resize-none py-3 mt-0 !bg-muted"
+          className={`pr-12 border-border rounded-2xl resize-none py-3 mt-0 !bg-muted ${
+            large ? "min-h-[120px] max-h-48 text-lg" : "min-h-12 max-h-32"
+          }`}
           disabled={disabled}
           style={{
             scrollbarWidth: "thin",
             scrollbarColor: "#737373 transparent",
           }}
-          rows={1}
+          rows={large ? 3 : 1}
         />
         <Button
           onClick={handleSend}

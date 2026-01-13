@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import Image from "next/image";
 import { Loader2, Trash2, RefreshCw } from "lucide-react";
 
 import {
@@ -20,19 +21,6 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { AddSlackChannelDialog } from "./add-slack-channel-dialog";
-
-function SlackIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      viewBox="0 0 24 24"
-      fill="currentColor"
-      xmlns="http://www.w3.org/2000/svg"
-    >
-      <path d="M5.042 15.165a2.528 2.528 0 0 1-2.52 2.523A2.528 2.528 0 0 1 0 15.165a2.527 2.527 0 0 1 2.522-2.52h2.52v2.52zm1.271 0a2.527 2.527 0 0 1 2.521-2.52 2.527 2.527 0 0 1 2.521 2.52v6.313A2.528 2.528 0 0 1 8.834 24a2.528 2.528 0 0 1-2.521-2.522v-6.313zM8.834 5.042a2.528 2.528 0 0 1-2.521-2.52A2.528 2.528 0 0 1 8.834 0a2.528 2.528 0 0 1 2.521 2.522v2.52H8.834zm0 1.271a2.528 2.528 0 0 1 2.521 2.521 2.528 2.528 0 0 1-2.521 2.521H2.522A2.528 2.528 0 0 1 0 8.834a2.528 2.528 0 0 1 2.522-2.521h6.312zM18.956 8.834a2.528 2.528 0 0 1 2.522-2.521A2.528 2.528 0 0 1 24 8.834a2.528 2.528 0 0 1-2.522 2.521h-2.522V8.834zm-1.27 0a2.528 2.528 0 0 1-2.522 2.521 2.528 2.528 0 0 1-2.522-2.521V2.522A2.528 2.528 0 0 1 15.164 0a2.528 2.528 0 0 1 2.522 2.522v6.312zM15.164 18.956a2.528 2.528 0 0 1 2.522 2.522A2.528 2.528 0 0 1 15.164 24a2.528 2.528 0 0 1-2.522-2.522v-2.522h2.522zm0-1.27a2.528 2.528 0 0 1-2.522-2.522 2.528 2.528 0 0 1 2.522-2.522h6.314A2.528 2.528 0 0 1 24 15.164a2.528 2.528 0 0 1-2.522 2.522h-6.314z" />
-    </svg>
-  );
-}
 
 interface SlackChannel {
   id: string;
@@ -80,11 +68,11 @@ export function ManageSlackChannelsDialog({
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="outline" size="sm" className="rounded-full font-bold">
-          <SlackIcon className="size-4" />
+        <Button variant="outline" size="sm" className="rounded-full">
+          <Image src="/slack.png" alt="Slack" width={16} height={16} />
           {isLoading
             ? "Loading..."
-            : `${channelCount} channel${channelCount !== 1 ? "s" : ""}`}
+            : `${channelCount} Channel${channelCount !== 1 ? "s" : ""}`}
         </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-md">
@@ -114,8 +102,8 @@ export function ManageSlackChannelsDialog({
                     className="flex items-center justify-between rounded-md border bg-card p-3"
                   >
                     <div className="flex items-center gap-3">
-                      <div className="flex size-8 items-center justify-center rounded-md bg-primary/10">
-                        <SlackIcon className="size-4 text-primary" />
+                      <div className="flex size-8 items-center justify-center rounded-md bg-muted">
+                        <Image src="/slack.png" alt="Slack" width={16} height={16} />
                       </div>
                       <div>
                         <div className="font-medium text-sm">

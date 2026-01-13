@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import Image from "next/image";
 import { Loader2, Video, Trash2, Plus } from "lucide-react";
 
 import {
@@ -14,19 +15,6 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-
-function TldvIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      viewBox="0 0 24 24"
-      fill="currentColor"
-      xmlns="http://www.w3.org/2000/svg"
-    >
-      <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z" />
-    </svg>
-  );
-}
 
 interface TldvEmail {
   id: string;
@@ -75,11 +63,11 @@ export function ManageTldvDialog({
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="outline" size="sm" className="rounded-full font-bold">
-          <TldvIcon className="size-4" />
+        <Button variant="outline" size="sm" className="rounded-full">
+          <Image src="/tldv.png" alt="tl;dv" width={16} height={16} />
           {isLoading
             ? "Loading..."
-            : `${emailCount} meeting${emailCount !== 1 ? "s" : ""}`}
+            : `${emailCount} Meeting${emailCount !== 1 ? "s" : ""}`}
         </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-md">
@@ -137,8 +125,8 @@ export function ManageTldvDialog({
                     className="flex items-center justify-between rounded-md border bg-card p-3"
                   >
                     <div className="flex items-center gap-3">
-                      <div className="flex size-8 items-center justify-center rounded-md bg-primary/10">
-                        <Video className="size-4 text-primary" />
+                      <div className="flex size-8 items-center justify-center rounded-md bg-muted">
+                        <Image src="/tldv.png" alt="tl;dv" width={16} height={16} />
                       </div>
                       <div>
                         <div className="font-medium text-sm">{email.email}</div>
