@@ -80,6 +80,8 @@ export function NavMain() {
   const [mounted, setMounted] = React.useState(false);
   const [chats, setChats] = React.useState<Chat[]>([]);
   const [isLoadingChats, setIsLoadingChats] = React.useState(true);
+  // Track chats that have been activated (user sent a message)
+  const [activatedChatIds, setActivatedChatIds] = React.useState<Set<string>>(new Set());
 
   // Handle hydration mismatch by only reading searchParams after mount
   React.useEffect(() => {
@@ -102,9 +104,9 @@ export function NavMain() {
   const visibleChats = chats.slice(0, MAX_VISIBLE_CHATS);
   const remainingChatsCount = Math.max(0, chats.length - MAX_VISIBLE_CHATS);
 
-  // Check if currently on an empty new chat (title is still "New Chat")
+  // Check if currently on an empty new chat (title is still "New Chat" AND not activated)
   const currentChat = currentChatId ? chats.find((c) => c.id === currentChatId) : null;
-  const isOnEmptyNewChat = currentChat?.title === "New Chat";
+  const isOnEmptyNewChat = currentChat?.title === "New Chat" && !activatedChatIds.has(currentChatId!);
 
   // Filtered chats for dialog
   const filteredChats = chats.filter((chat) =>
@@ -151,6 +153,21 @@ export function NavMain() {
       window.removeEventListener("chat-updated", handleChatUpdate);
     };
   }, [fetchChats]);
+
+  // Listen for chat activation (user sent a message - unlock "New Chat" button immediately)
+  React.useEffect(() => {
+    const handleChatActivated = (event: CustomEvent<{ chatId: string }>) => {
+      const { chatId } = event.detail;
+      if (chatId) {
+        setActivatedChatIds((prev) => new Set(prev).add(chatId));
+      }
+    };
+
+    window.addEventListener("chat-activated", handleChatActivated as EventListener);
+    return () => {
+      window.removeEventListener("chat-activated", handleChatActivated as EventListener);
+    };
+  }, []);
 
   // Navigate to new chat view (chat is created on first message)
   const createNewChat = (e: React.MouseEvent) => {
@@ -210,24 +227,26 @@ export function NavMain() {
           ))}
           
           {/* Company Brain with collapsible chats */}
-          <Collapsible
-            asChild
-            open={companyBrainOpen}
-            className="group/collapsible"
-          >
-            <SidebarMenuItem>
-              <CollapsibleTrigger asChild>
-                <SidebarMenuButton
-                  tooltip="Company Brain"
-                  isActive={isCompanyBrainActive && !currentChatId}
-                  onClick={() => router.push("/company-brain")}
-                  className="cursor-pointer"
-                >
-                  <Brain className="size-4" />
-                  <span>Company Brain</span>
-                  <ChevronRight className="ml-auto size-4 transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90" />
-                </SidebarMenuButton>
-              </CollapsibleTrigger>
+          {/* Only render Collapsible after mount to avoid hydration mismatch with Radix IDs */}
+          {mounted ? (
+            <Collapsible
+              asChild
+              open={companyBrainOpen}
+              className="group/collapsible"
+            >
+              <SidebarMenuItem>
+                <CollapsibleTrigger asChild>
+                  <SidebarMenuButton
+                    tooltip="Company Brain"
+                    isActive={isCompanyBrainActive && !currentChatId}
+                    onClick={() => router.push("/company-brain")}
+                    className="cursor-pointer"
+                  >
+                    <Brain className="size-4" />
+                    <span>Company Brain</span>
+                    <ChevronRight className="ml-auto size-4 transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90" />
+                  </SidebarMenuButton>
+                </CollapsibleTrigger>
               <CollapsibleContent>
                 <SidebarMenuSub className="mx-0 px-0 border-l-0 ml-6">
                   {/* Chats header */}
@@ -380,6 +399,19 @@ export function NavMain() {
               </CollapsibleContent>
             </SidebarMenuItem>
           </Collapsible>
+          ) : (
+            /* SSR fallback - simple non-collapsible version */
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                tooltip="Company Brain"
+                isActive={isCompanyBrainActive}
+              >
+                <Brain className="size-4" />
+                <span>Company Brain</span>
+                <ChevronRight className="ml-auto size-4" />
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          )}
         </SidebarMenu>
       </SidebarGroupContent>
 

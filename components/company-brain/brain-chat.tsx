@@ -169,6 +169,10 @@ export function BrainChat({ chatId }: BrainChatProps) {
 
     respondingChatIdRef.current = activeChatId;
 
+    // Immediately notify that this chat is now active (user sent a message)
+    // This unlocks the "New Chat" button without waiting for API response
+    window.dispatchEvent(new CustomEvent("chat-activated", { detail: { chatId: activeChatId } }));
+
     try {
       const conversationHistory = [...messages, userMessage].map((msg) => ({
         role: msg.role,
@@ -234,6 +238,8 @@ export function BrainChat({ chatId }: BrainChatProps) {
         setIsResponding(false);
         respondingChatIdRef.current = null;
       }
+      // Notify NavMain that chat is updated (title may have changed after first message)
+      window.dispatchEvent(new CustomEvent("chat-updated"));
       setTimeout(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
       }, 100);

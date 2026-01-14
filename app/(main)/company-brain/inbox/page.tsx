@@ -23,10 +23,26 @@ interface SlackChannel {
   created_at: string;
 }
 
+interface TldvMeeting {
+  id: string;
+  meetingId: string;
+  title: string;
+  date: string;
+  durationSeconds: number;
+  chunkCount: number;
+  tldvUrl: string;
+  organizerName: string | null;
+  organizerEmail: string | null;
+  invitees: Array<{ name: string; email: string }>;
+  createdAt: string;
+}
+
 export default function CompanyBrainInboxPage() {
   const { organization } = useOrganization();
   const [channels, setChannels] = React.useState<SlackChannel[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
+  const [tldvMeetings, setTldvMeetings] = React.useState<TldvMeeting[]>([]);
+  const [isTldvLoading, setIsTldvLoading] = React.useState(true);
 
   const fetchConnectedChannels = React.useCallback(async () => {
     if (!organization) return;
@@ -45,9 +61,27 @@ export default function CompanyBrainInboxPage() {
     }
   }, [organization]);
 
+  const fetchTldvMeetings = React.useCallback(async () => {
+    if (!organization) return;
+
+    try {
+      const response = await fetch("/api/tldv/meetings");
+      const data = await response.json();
+
+      if (response.ok) {
+        setTldvMeetings(data.meetings || []);
+      }
+    } catch (error) {
+      console.error("Failed to fetch tldv meetings:", error);
+    } finally {
+      setIsTldvLoading(false);
+    }
+  }, [organization]);
+
   React.useEffect(() => {
     fetchConnectedChannels();
-  }, [fetchConnectedChannels]);
+    fetchTldvMeetings();
+  }, [fetchConnectedChannels, fetchTldvMeetings]);
 
   const handleRemoveChannel = async (channelId: string) => {
     try {
@@ -60,6 +94,31 @@ export default function CompanyBrainInboxPage() {
       }
     } catch (error) {
       console.error("Failed to remove channel:", error);
+    }
+  };
+
+  const handleAddTldvMeeting = async (url: string) => {
+    const response = await fetch("/api/tldv/meetings/add", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url }),
+    });
+
+    if (!response.ok) {
+      const data = await response.json();
+      throw new Error(data.error || "Failed to add meeting");
+    }
+
+    await fetchTldvMeetings();
+  };
+
+  const handleRemoveTldvMeeting = async (meetingId: string) => {
+    const response = await fetch(`/api/tldv/meetings/${meetingId}`, {
+      method: "DELETE",
+    });
+
+    if (response.ok) {
+      await fetchTldvMeetings();
     }
   };
 
@@ -104,7 +163,12 @@ export default function CompanyBrainInboxPage() {
                 onChannelAdded={fetchConnectedChannels}
                 onChannelRemoved={handleRemoveChannel}
               />
-              <ManageTldvDialog />
+              <ManageTldvDialog
+                meetings={tldvMeetings}
+                isLoading={isTldvLoading}
+                onMeetingAdded={handleAddTldvMeeting}
+                onMeetingRemoved={handleRemoveTldvMeeting}
+              />
               <ManageDriveFoldersDialog />
               <ManageGmailAddressesDialog />
               <ManageUploadedFilesDialog />

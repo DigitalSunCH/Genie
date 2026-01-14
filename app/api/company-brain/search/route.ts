@@ -1,16 +1,16 @@
 import { NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
-import { searchSlackMessages, SlackSearchResult } from "@/lib/pinecone";
+import { searchCompanyBrain, CompanyBrainSearchResult, SourceType } from "@/lib/pinecone";
 
 export interface SearchResponse {
-  results: SlackSearchResult[];
+  results: CompanyBrainSearchResult[];
   query: string;
   totalResults: number;
 }
 
 /**
  * POST /api/company-brain/search
- * Searches vectorized Slack messages in Pinecone
+ * Searches all company brain sources in Pinecone
  */
 export async function POST(request: Request) {
   try {
@@ -24,9 +24,9 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json();
-    const { query, channelId, topK } = body as {
+    const { query, sourceType, topK } = body as {
       query?: string;
-      channelId?: string;
+      sourceType?: SourceType;
       topK?: number;
     };
 
@@ -38,9 +38,9 @@ export async function POST(request: Request) {
     }
 
     // Search Pinecone
-    const results = await searchSlackMessages(orgId, query.trim(), {
+    const results = await searchCompanyBrain(orgId, query.trim(), {
       topK: topK ?? 10,
-      channelId,
+      sourceType,
     });
 
     const response: SearchResponse = {
@@ -58,4 +58,3 @@ export async function POST(request: Request) {
     );
   }
 }
-

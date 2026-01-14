@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import Anthropic from "@anthropic-ai/sdk";
-import { searchSlackMessages } from "@/lib/pinecone";
+import { searchCompanyBrain, CompanyBrainSearchResult } from "@/lib/pinecone";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { formatTime } from "@/lib/tldv";
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
@@ -41,16 +42,17 @@ const tools: Anthropic.Tool[] = [
 
 const getSystemPrompt = () => {
   const today = new Date().toISOString().split('T')[0];
-  return `You are the Company Brain assistant - an AI that helps users find and understand information from their company's connected data sources including Slack channels, meeting recordings, and documents.
+  return `You are the Company Brain assistant - an AI that helps users find and understand information from their company's connected data sources including Slack channels, tl;dv meeting recordings, and documents.
 
 Today's date is ${today}.
 
 When users ask questions about internal discussions, decisions, projects, team updates, or company knowledge:
 1. Use the search_company_brain tool to find relevant information
 2. For time-based queries like "last week", "yesterday", "this month", calculate the appropriate start_date and end_date
-3. For channel-specific queries like "in #engineering", use the channel_name filter
-4. Synthesize the results into a clear, helpful answer
-5. Always cite your sources by mentioning the channel name, who said it, and when
+3. Synthesize the results into a clear, helpful answer
+4. Always cite your sources:
+   - For Slack: mention the channel name, who said it, and when
+   - For meeting recordings: mention the meeting title, speaker, and timestamp in the recording
 
 When you don't find relevant information, be honest and let the user know. For general questions not related to company knowledge, you can answer directly without searching.
 
@@ -63,7 +65,7 @@ interface ChatMessage {
 }
 
 // Source type for tracking where information came from
-interface Source {
+interface SlackSource {
   type: "slack";
   channelName: string;
   userName: string;
@@ -72,6 +74,19 @@ interface Source {
   slackLink: string;
   isThread: boolean;
 }
+
+interface TldvSource {
+  type: "tldv";
+  meetingTitle: string;
+  speaker?: string;
+  timestamp: string;
+  text: string;
+  tldvUrl?: string;
+  startTime?: number;
+  endTime?: number;
+}
+
+type Source = SlackSource | TldvSource;
 
 export async function POST(request: Request) {
   try {
@@ -182,70 +197,108 @@ export async function POST(request: Request) {
       messages: anthropicMessages,
     });
 
-    // Handle tool use loop
+    // Handle tool use loop - must handle ALL tool_use blocks in each response
     while (response.stop_reason === "tool_use") {
-      const toolUseBlock = response.content.find(
+      // Get ALL tool_use blocks (not just the first one)
+      const toolUseBlocks = response.content.filter(
         (block): block is Anthropic.ToolUseBlock => block.type === "tool_use"
       );
 
-      if (!toolUseBlock) break;
+      if (toolUseBlocks.length === 0) break;
 
-      let toolResult: string;
+      // Process each tool use and collect results
+      const toolResults: Anthropic.ToolResultBlockParam[] = [];
 
-      if (toolUseBlock.name === "search_company_brain") {
-        const input = toolUseBlock.input as { 
-          query: string;
-          channel_name?: string;
-          start_date?: string;
-          end_date?: string;
-        };
-        
-        try {
-          const searchResults = await searchSlackMessages(orgId, input.query, {
-            topK: 10,
-            channelName: input.channel_name,
-            startDate: input.start_date,
-            endDate: input.end_date,
-          });
+      for (const toolUseBlock of toolUseBlocks) {
+        let toolResult: string;
 
-          if (searchResults.length === 0) {
-            toolResult = "No relevant information found in the Company Brain for this query.";
-          } else {
-            // Track sources for the response
-            for (const result of searchResults) {
-              sources.push({
-                type: "slack",
-                channelName: result.channelName,
-                userName: result.userName,
-                timestamp: result.timestamp,
-                text: result.text,
-                slackLink: result.slackLink,
-                isThread: result.isThread,
-              });
-            }
+        if (toolUseBlock.name === "search_company_brain") {
+          const input = toolUseBlock.input as {
+            query: string;
+            channel_name?: string;
+            start_date?: string;
+            end_date?: string;
+          };
 
-            // Format results for Claude
-            toolResult = searchResults
-              .map((result, index) => {
+          try {
+            const searchResults = await searchCompanyBrain(orgId, input.query, {
+              topK: 10,
+              startDate: input.start_date,
+              endDate: input.end_date,
+            });
+
+            if (searchResults.length === 0) {
+              toolResult = "No relevant information found in the Company Brain for this query.";
+            } else {
+              // Track sources and format results for Claude
+              const formattedResults: string[] = [];
+
+              for (let i = 0; i < searchResults.length; i++) {
+                const result = searchResults[i];
                 const date = new Date(result.timestamp).toLocaleDateString();
-                return `[Result ${index + 1}]
+
+                if (result.sourceType === "slack") {
+                  // Slack source
+                  sources.push({
+                    type: "slack",
+                    channelName: result.channelName || "",
+                    userName: result.userName || "",
+                    timestamp: result.timestamp,
+                    text: result.text,
+                    slackLink: result.slackLink || "",
+                    isThread: result.isThread || false,
+                  });
+
+                  formattedResults.push(`[Result ${i + 1} - Slack]
 Channel: #${result.channelName}
 From: ${result.userName}
 Date: ${date}
 Content: ${result.text}
-${result.isThread ? "(This is part of a thread)" : ""}`;
-              })
-              .join("\n\n---\n\n");
+${result.isThread ? "(This is part of a thread)" : ""}`);
+                } else if (result.sourceType === "tldv") {
+                  // tldv meeting source
+                  sources.push({
+                    type: "tldv",
+                    meetingTitle: result.meetingTitle || "",
+                    speaker: result.speaker,
+                    timestamp: result.timestamp,
+                    text: result.text,
+                    tldvUrl: result.tldvUrl,
+                    startTime: result.startTime,
+                    endTime: result.endTime,
+                  });
+
+                  const timeRange = result.startTime !== undefined && result.endTime !== undefined
+                    ? ` (${formatTime(result.startTime)}-${formatTime(result.endTime)})`
+                    : "";
+
+                  formattedResults.push(`[Result ${i + 1} - Meeting Recording]
+Meeting: ${result.meetingTitle}
+${result.speaker ? `Speaker: ${result.speaker}${timeRange}` : ""}
+Date: ${date}
+Content: ${result.text}`);
+                }
+              }
+
+              toolResult = formattedResults.join("\n\n---\n\n");
+            }
+          } catch (error) {
+            console.error("Search error:", error);
+            toolResult = "Error searching the Company Brain. Please try again.";
           }
-        } catch (error) {
-          console.error("Search error:", error);
-          toolResult = "Error searching the Company Brain. Please try again.";
+        } else {
+          toolResult = `Unknown tool: ${toolUseBlock.name}`;
         }
-      } else {
-        toolResult = `Unknown tool: ${toolUseBlock.name}`;
+
+        // Add this tool's result to the collection
+        toolResults.push({
+          type: "tool_result",
+          tool_use_id: toolUseBlock.id,
+          content: toolResult,
+        });
       }
 
-      // Continue conversation with tool result
+      // Continue conversation with ALL tool results
       response = await anthropic.messages.create({
         model: model || "claude-sonnet-4-20250514",
         max_tokens: 4096,
@@ -256,13 +309,7 @@ ${result.isThread ? "(This is part of a thread)" : ""}`;
           { role: "assistant", content: response.content },
           {
             role: "user",
-            content: [
-              {
-                type: "tool_result",
-                tool_use_id: toolUseBlock.id,
-                content: toolResult,
-              },
-            ],
+            content: toolResults,
           },
         ],
       });

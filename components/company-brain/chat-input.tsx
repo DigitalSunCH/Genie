@@ -2,9 +2,6 @@
 
 import {
   ArrowUp,
-  Sparkles,
-  Zap,
-  Brain,
   Check,
   ChevronDown,
   Plus,
@@ -14,6 +11,7 @@ import {
   FileText,
   X,
 } from "lucide-react";
+import Image from "next/image";
 import { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -28,19 +26,6 @@ const AI_MODELS = [
     id: "claude-opus-4-20250514",
     name: "Claude Opus 4.5",
     description: "Most intelligent, best for complex tasks",
-    icon: Brain,
-  },
-  {
-    id: "claude-sonnet-4-20250514",
-    name: "Claude Sonnet 4",
-    description: "Great balance of speed and intelligence",
-    icon: Sparkles,
-  },
-  {
-    id: "gpt-4o",
-    name: "GPT-4o",
-    description: "OpenAI's most capable model",
-    icon: Zap,
   },
 ] as const;
 
@@ -179,7 +164,7 @@ export function ChatInput({
               size="sm"
               className="rounded-full gap-1.5"
             >
-              <currentModel.icon className="size-3.5" />
+              <Image src="/claude.png" alt="Claude" width={14} height={14} className="rounded-sm" />
               {currentModel.name}
               <ChevronDown className="size-3 opacity-50" />
             </Button>
@@ -192,7 +177,7 @@ export function ChatInput({
                   onClick={() => handleSelectModel(model.id)}
                   className="w-full flex items-start gap-3 p-2 rounded-lg hover:bg-muted transition-colors text-left"
                 >
-                  <model.icon className="size-4 mt-0.5 shrink-0" />
+                  <Image src="/claude.png" alt="Claude" width={16} height={16} className="rounded-sm mt-0.5 shrink-0" />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between">
                       <span className="text-sm font-medium">{model.name}</span>
