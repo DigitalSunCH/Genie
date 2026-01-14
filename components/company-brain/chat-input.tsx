@@ -14,7 +14,7 @@ import {
   FileText,
   X,
 } from "lucide-react";
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -79,6 +79,7 @@ interface ChatInputProps {
   onSendMessage?: (message: string, model: string) => void;
   disabled?: boolean;
   large?: boolean;
+  autoFocus?: boolean;
 }
 
 export function ChatInput({
@@ -86,12 +87,21 @@ export function ChatInput({
   onSendMessage,
   disabled = false,
   large = false,
+  autoFocus = false,
 }: ChatInputProps) {
   const [message, setMessage] = useState("");
   const [selectedModel, setSelectedModel] = useState<AIModelId>("claude-opus-4-20250514");
   const [selectedTools, setSelectedTools] = useState<ToolId[]>([]);
   const [isModelPopoverOpen, setIsModelPopoverOpen] = useState(false);
   const [isToolPopoverOpen, setIsToolPopoverOpen] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Auto-focus textarea when requested
+  useEffect(() => {
+    if (autoFocus && textareaRef.current) {
+      textareaRef.current.focus();
+    }
+  }, [autoFocus]);
 
   const currentModel = AI_MODELS.find((m) => m.id === selectedModel)!;
   const availableTools = TOOLS.filter((t) => !selectedTools.includes(t.id));
@@ -130,6 +140,7 @@ export function ChatInput({
     >
       <div className="relative">
         <Textarea
+          ref={textareaRef}
           value={message}
           onChange={(e) => setMessage(e.target.value)}
           onKeyDown={handleKeyDown}

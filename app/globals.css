@@ -308,3 +308,8 @@
   margin-top: 0.75rem;
   margin-bottom: 0.75rem;
 }
+
+/* Custom duration for inbox animations */
+.duration-400 {
+  transition-duration: 400ms;
+}

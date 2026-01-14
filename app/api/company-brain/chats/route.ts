@@ -30,7 +30,7 @@ export async function GET() {
       );
     }
 
-    // Get chats shared with the user
+    // Get chats shared with the user (only from the same organization)
     const { data: sharedChatIds, error: sharedError } = await supabaseAdmin
       .from("company_brain_chat_shares")
       .select("chat_id")
@@ -47,10 +47,12 @@ export async function GET() {
     let sharedChats: typeof ownedChats = [];
     if (sharedChatIds && sharedChatIds.length > 0) {
       const chatIds = sharedChatIds.map((s) => s.chat_id);
+      // Only fetch shared chats that belong to the current organization
       const { data: shared, error: sharedChatsError } = await supabaseAdmin
         .from("company_brain_chats")
         .select("id, title, created_by, created_at, updated_at")
         .in("id", chatIds)
+        .eq("organization_id", orgId) // Filter by current org
         .order("updated_at", { ascending: false });
 
       if (sharedChatsError) {

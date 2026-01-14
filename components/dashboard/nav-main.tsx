@@ -4,6 +4,7 @@ import * as React from "react";
 import { ChartNoAxesColumn, Brain, CheckSquare, Calendar, Map, ChevronRight, Plus, Loader2, Ellipsis, Trash2, Share2, Search, MessageSquare } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useOrganization } from "@clerk/nextjs";
 import {
   SidebarGroup,
   SidebarGroupContent,
@@ -74,6 +75,7 @@ export function NavMain() {
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { organization } = useOrganization();
   
   const [mounted, setMounted] = React.useState(false);
   const [chats, setChats] = React.useState<Chat[]>([]);
@@ -85,8 +87,6 @@ export function NavMain() {
   }, []);
 
   const currentChatId = mounted ? searchParams.get("chat") : null;
-  const [isCreatingChat, setIsCreatingChat] = React.useState(false);
-  const [companyBrainOpen, setCompanyBrainOpen] = React.useState(true);
   const [allChatsOpen, setAllChatsOpen] = React.useState(false);
   const [searchQuery, setSearchQuery] = React.useState("");
   const [shareDialogOpen, setShareDialogOpen] = React.useState(false);
@@ -94,18 +94,30 @@ export function NavMain() {
 
   const isActive = (path: string) => pathname === path;
   const isCompanyBrainActive = pathname === "/company-brain";
+  
+  // Company Brain should only be expanded when on the company-brain route
+  const companyBrainOpen = isCompanyBrainActive;
 
   // Visible chats (first 5)
   const visibleChats = chats.slice(0, MAX_VISIBLE_CHATS);
   const remainingChatsCount = Math.max(0, chats.length - MAX_VISIBLE_CHATS);
+
+  // Check if currently on an empty new chat (title is still "New Chat")
+  const currentChat = currentChatId ? chats.find((c) => c.id === currentChatId) : null;
+  const isOnEmptyNewChat = currentChat?.title === "New Chat";
 
   // Filtered chats for dialog
   const filteredChats = chats.filter((chat) =>
     chat.title.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  // Fetch chats
-  const fetchChats = React.useCallback(async () => {
+  // Fetch chats - refetch when organization changes
+  const fetchChats = React.useCallback(async (showLoading = false) => {
+    if (!organization?.id) return;
+    
+    if (showLoading) {
+      setIsLoadingChats(true);
+    }
     try {
       const response = await fetch("/api/company-brain/chats");
       const data = await response.json();
@@ -115,35 +127,37 @@ export function NavMain() {
     } catch (error) {
       console.error("Failed to fetch chats:", error);
     } finally {
-      setIsLoadingChats(false);
+      if (showLoading) {
+        setIsLoadingChats(false);
+      }
     }
-  }, []);
+  }, [organization?.id]);
 
   React.useEffect(() => {
-    fetchChats();
+    // Clear chats immediately when org changes to avoid showing stale data
+    setChats([]);
+    setIsLoadingChats(true);
+    fetchChats(true);
   }, [fetchChats]);
 
-  // Create new chat
-  const createNewChat = async (e: React.MouseEvent) => {
+  // Listen for chat updates (e.g., when a chat title changes after first message)
+  React.useEffect(() => {
+    const handleChatUpdate = () => {
+      fetchChats(false); // Silent refresh, no loading state
+    };
+
+    window.addEventListener("chat-updated", handleChatUpdate);
+    return () => {
+      window.removeEventListener("chat-updated", handleChatUpdate);
+    };
+  }, [fetchChats]);
+
+  // Navigate to new chat view (chat is created on first message)
+  const createNewChat = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    setIsCreatingChat(true);
-    try {
-      const response = await fetch("/api/company-brain/chats", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: "New Chat" }),
-      });
-      const data = await response.json();
-      if (response.ok) {
-        setChats((prev) => [data.chat, ...prev]);
-        router.push(`/company-brain?chat=${data.chat.id}`);
-      }
-    } catch (error) {
-      console.error("Failed to create chat:", error);
-    } finally {
-      setIsCreatingChat(false);
-    }
+    // Just navigate to empty chat view - BrainChat will create the chat on first message
+    router.push("/company-brain");
   };
 
   // Delete chat
@@ -199,7 +213,6 @@ export function NavMain() {
           <Collapsible
             asChild
             open={companyBrainOpen}
-            onOpenChange={setCompanyBrainOpen}
             className="group/collapsible"
           >
             <SidebarMenuItem>
@@ -225,13 +238,10 @@ export function NavMain() {
                       size="sm"
                       className="h-6 px-2 text-xs cursor-pointer"
                       onClick={createNewChat}
-                      disabled={isCreatingChat}
+                      disabled={isOnEmptyNewChat || !currentChatId}
+                      title={isOnEmptyNewChat || !currentChatId ? "Start a conversation first" : undefined}
                     >
-                      {isCreatingChat ? (
-                        <Loader2 className="size-3 animate-spin mr-1" />
-                      ) : (
-                        <Plus className="size-3 mr-1" />
-                      )}
+                      <Plus className="size-3 mr-1" />
                       New Chat
                     </Button>
                   </div>

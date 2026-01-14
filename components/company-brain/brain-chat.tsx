@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { Loader2 } from "lucide-react";
-import { useUser } from "@clerk/nextjs";
+import { useUser, useOrganization } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 
@@ -31,6 +31,7 @@ interface BrainChatProps {
 
 export function BrainChat({ chatId }: BrainChatProps) {
   const { user } = useUser();
+  const { organization } = useOrganization();
   const router = useRouter();
   const [mounted, setMounted] = React.useState(false);
   const [messages, setMessages] = React.useState<Message[]>([]);
@@ -39,19 +40,47 @@ export function BrainChat({ chatId }: BrainChatProps) {
   const messagesEndRef = React.useRef<HTMLDivElement>(null);
   const respondingChatIdRef = React.useRef<string | null>(null);
   const [currentChatId, setCurrentChatId] = React.useState<string | null>(chatId || null);
+  const prevOrgIdRef = React.useRef<string | undefined>(organization?.id);
+  // Track if we just created this chat locally (to skip reloading when URL updates)
+  const locallyCreatedChatIdRef = React.useRef<string | null>(null);
 
   // Handle hydration mismatch
   React.useEffect(() => {
     setMounted(true);
   }, []);
 
-  // Load chat when chatId changes
+  // Clear chat and redirect when organization changes
   React.useEffect(() => {
-    if (chatId) {
-      loadChat(chatId);
-    } else {
+    if (prevOrgIdRef.current && organization?.id && prevOrgIdRef.current !== organization.id) {
+      // Organization changed - clear chat and redirect to base page
       setMessages([]);
       setCurrentChatId(null);
+      setIsResponding(false);
+      respondingChatIdRef.current = null;
+      locallyCreatedChatIdRef.current = null;
+      if (chatId) {
+        router.push("/company-brain");
+      }
+    }
+    prevOrgIdRef.current = organization?.id;
+  }, [organization?.id, chatId, router]);
+
+  // Load chat when chatId changes (but skip if we just created it locally)
+  React.useEffect(() => {
+    if (chatId) {
+      // Skip loading if this is a chat we just created locally
+      if (locallyCreatedChatIdRef.current === chatId) {
+        locallyCreatedChatIdRef.current = null;
+        setCurrentChatId(chatId);
+        return;
+      }
+      loadChat(chatId);
+    } else {
+      // Only reset if we're not in the middle of responding
+      if (!isResponding) {
+        setMessages([]);
+        setCurrentChatId(null);
+      }
     }
   }, [chatId]);
 
@@ -93,9 +122,24 @@ export function BrainChat({ chatId }: BrainChatProps) {
   };
 
   const handleSendMessage = async (content: string, model: string) => {
+    // Show user message immediately
+    const userMessage: Message = {
+      id: Date.now().toString(),
+      role: "user",
+      content,
+      timestamp: new Date(),
+    };
+
+    setMessages((prev) => [...prev, userMessage]);
+    setIsResponding(true);
+
+    setTimeout(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }, 100);
+
     let activeChatId = currentChatId;
     
-    // Create chat if none exists
+    // Create chat if none exists (in background, after showing message)
     if (!activeChatId) {
       try {
         const response = await fetch("/api/company-brain/chats", {
@@ -109,29 +153,21 @@ export function BrainChat({ chatId }: BrainChatProps) {
         if (response.ok) {
           activeChatId = data.chat.id;
           setCurrentChatId(activeChatId);
-          // Update URL to include the new chat ID
-          router.push(`/company-brain?chat=${activeChatId}`);
+          // Mark as locally created so we don't reload when URL changes
+          locallyCreatedChatIdRef.current = activeChatId;
+          // Update URL without causing a full navigation/reload
+          router.replace(`/company-brain?chat=${activeChatId}`, { scroll: false });
+          // Notify NavMain about the new chat
+          window.dispatchEvent(new CustomEvent("chat-updated"));
         }
       } catch (error) {
         console.error("Failed to create chat:", error);
+        setIsResponding(false);
         return;
       }
     }
 
-    const userMessage: Message = {
-      id: Date.now().toString(),
-      role: "user",
-      content,
-      timestamp: new Date(),
-    };
-
-    setMessages((prev) => [...prev, userMessage]);
-    setIsResponding(true);
     respondingChatIdRef.current = activeChatId;
-
-    setTimeout(() => {
-      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-    }, 100);
 
     try {
       const conversationHistory = [...messages, userMessage].map((msg) => ({
@@ -139,7 +175,7 @@ export function BrainChat({ chatId }: BrainChatProps) {
         content: msg.content,
       }));
 
-      const response = await fetch("/api/company-brain/chat", {
+      const fetchPromise = fetch("/api/company-brain/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -150,6 +186,12 @@ export function BrainChat({ chatId }: BrainChatProps) {
         }),
       });
 
+      // Notify NavMain early - title is updated after saving user message, before AI responds
+      setTimeout(() => {
+        window.dispatchEvent(new CustomEvent("chat-updated"));
+      }, 300);
+
+      const response = await fetchPromise;
       const data = await response.json();
       const stillOnSameChat = respondingChatIdRef.current === activeChatId;
 
@@ -212,7 +254,7 @@ export function BrainChat({ chatId }: BrainChatProps) {
             Hey {mounted ? (user?.firstName || "there") : "there"} 👋
           </h1>
           <div className="w-full max-w-2xl">
-            <ChatInput onSendMessage={handleSendMessage} disabled={isResponding} className="!p-0" large />
+            <ChatInput onSendMessage={handleSendMessage} disabled={isResponding} className="!p-0" large autoFocus />
           </div>
         </div>
       ) : (

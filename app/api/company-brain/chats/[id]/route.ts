@@ -8,9 +8,9 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { orgId } = await auth();
+    const { orgId, userId } = await auth();
 
-    if (!orgId) {
+    if (!orgId || !userId) {
       return NextResponse.json(
         { error: "Unauthorized - no organization selected" },
         { status: 401 }
@@ -19,7 +19,7 @@ export async function GET(
 
     const { id } = await params;
 
-    // Get chat
+    // Get chat - must belong to the current organization
     const { data: chat, error: chatError } = await supabaseAdmin
       .from("company_brain_chats")
       .select("*")
@@ -32,6 +32,24 @@ export async function GET(
         { error: "Chat not found" },
         { status: 404 }
       );
+    }
+
+    // Verify user has access (owner or shared with)
+    const isOwner = chat.created_by === userId;
+    if (!isOwner) {
+      const { data: share } = await supabaseAdmin
+        .from("company_brain_chat_shares")
+        .select("id")
+        .eq("chat_id", id)
+        .eq("user_id", userId)
+        .single();
+
+      if (!share) {
+        return NextResponse.json(
+          { error: "Access denied" },
+          { status: 403 }
+        );
+      }
     }
 
     // Get messages

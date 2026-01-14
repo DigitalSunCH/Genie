@@ -14,7 +14,8 @@ export async function GET(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  // Verify user has access to this chat (owner or shared with)
+  // First verify the chat belongs to the current organization
+  // Chats can only be shared within the same organization
   const { data: chat } = await supabaseAdmin
     .from("company_brain_chats")
     .select("*")
@@ -23,7 +24,12 @@ export async function GET(
     .single();
 
   if (!chat) {
-    // Check if user has shared access
+    return NextResponse.json({ error: "Chat not found" }, { status: 404 });
+  }
+
+  // Verify user has access (owner or shared with)
+  const isOwner = chat.created_by === userId;
+  if (!isOwner) {
     const { data: share } = await supabaseAdmin
       .from("company_brain_chat_shares")
       .select("*")
@@ -32,7 +38,7 @@ export async function GET(
       .single();
 
     if (!share) {
-      return NextResponse.json({ error: "Chat not found" }, { status: 404 });
+      return NextResponse.json({ error: "Access denied" }, { status: 403 });
     }
   }
 

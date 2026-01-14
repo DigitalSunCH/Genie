@@ -3,7 +3,6 @@
 import * as React from "react";
 import { Brain, MessageSquare, Inbox } from "lucide-react";
 import { useOrganization } from "@clerk/nextjs";
-import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 
 import PageHeader from "@/components/common/page-header";
@@ -12,7 +11,7 @@ import { ManageDriveFoldersDialog } from "@/components/company-brain/manage-driv
 import { ManageUploadedFilesDialog } from "@/components/company-brain/manage-uploaded-files-dialog";
 import { ManageGmailAddressesDialog } from "@/components/company-brain/manage-gmail-addresses-dialog";
 import { ManageTldvDialog } from "@/components/company-brain/manage-tldv-dialog";
-import { BrainChat } from "@/components/company-brain/brain-chat";
+import { InboxCardStack } from "@/components/company-brain/inbox-card-stack";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -24,19 +23,10 @@ interface SlackChannel {
   created_at: string;
 }
 
-export default function CompanyBrainPage() {
+export default function CompanyBrainInboxPage() {
   const { organization } = useOrganization();
-  const searchParams = useSearchParams();
-  const [mounted, setMounted] = React.useState(false);
   const [channels, setChannels] = React.useState<SlackChannel[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
-
-  // Handle hydration mismatch by only reading searchParams after mount
-  React.useEffect(() => {
-    setMounted(true);
-  }, []);
-
-  const chatId = mounted ? searchParams.get("chat") : null;
 
   const fetchConnectedChannels = React.useCallback(async () => {
     if (!organization) return;
@@ -86,7 +76,7 @@ export default function CompanyBrainPage() {
           {/* Top Bar - Fixed height */}
           <div className="flex items-center justify-between flex-shrink-0">
             {/* Left: Tabs */}
-            <Tabs value="chat">
+            <Tabs value="inbox">
               <TabsList>
                 <TabsTrigger value="chat" className="gap-1.5" asChild>
                   <Link href="/company-brain">
@@ -122,11 +112,12 @@ export default function CompanyBrainPage() {
           </div>
 
           {/* Main Content Area */}
-          <div className="flex flex-1 gap-4 overflow-hidden mt-0">
-            <BrainChat chatId={chatId} />
+          <div className="flex flex-1 items-center justify-center overflow-hidden mt-2">
+            <InboxCardStack />
           </div>
         </Card>
       </div>
     </>
   );
 }
+

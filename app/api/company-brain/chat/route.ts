@@ -101,19 +101,68 @@ export async function POST(request: Request) {
     // Track sources used during this request
     const sources: Source[] = [];
 
-    // If we have a chatId and userMessage, save the user message first
-    if (chatId && userMessage) {
-      await supabaseAdmin.from("company_brain_messages").insert({
-        chat_id: chatId,
-        role: "user",
-        content: userMessage,
-      });
-
-      // Update chat's updated_at
-      await supabaseAdmin
+    // If we have a chatId, verify it belongs to the current organization and user has access
+    if (chatId) {
+      const { data: chat, error: chatError } = await supabaseAdmin
         .from("company_brain_chats")
-        .update({ updated_at: new Date().toISOString() })
-        .eq("id", chatId);
+        .select("id, created_by")
+        .eq("id", chatId)
+        .eq("organization_id", orgId)
+        .single();
+
+      if (chatError || !chat) {
+        return NextResponse.json(
+          { error: "Chat not found or access denied" },
+          { status: 404 }
+        );
+      }
+
+      // Verify user has access (owner or shared with)
+      const isOwner = chat.created_by === userId;
+      if (!isOwner) {
+        const { data: share } = await supabaseAdmin
+          .from("company_brain_chat_shares")
+          .select("id")
+          .eq("chat_id", chatId)
+          .eq("user_id", userId)
+          .single();
+
+        if (!share) {
+          return NextResponse.json(
+            { error: "Access denied" },
+            { status: 403 }
+          );
+        }
+      }
+
+      // Save the user message
+      if (userMessage) {
+        await supabaseAdmin.from("company_brain_messages").insert({
+          chat_id: chatId,
+          role: "user",
+          content: userMessage,
+        });
+
+        // Update chat's updated_at and title (if first message)
+        const updateData: { updated_at: string; title?: string } = {
+          updated_at: new Date().toISOString(),
+        };
+
+        // Generate title from first user message if this is a new chat
+        if (messages.length <= 2) {
+          const firstUserMessage = messages.find(m => m.role === "user")?.content;
+          if (firstUserMessage) {
+            updateData.title = firstUserMessage.length > 50 
+              ? firstUserMessage.slice(0, 50) + "..." 
+              : firstUserMessage;
+          }
+        }
+
+        await supabaseAdmin
+          .from("company_brain_chats")
+          .update(updateData)
+          .eq("id", chatId);
+      }
     }
 
     // Convert messages to Anthropic format
@@ -240,22 +289,6 @@ ${result.isThread ? "(This is part of a thread)" : ""}`;
         .from("company_brain_chats")
         .update({ updated_at: new Date().toISOString() })
         .eq("id", chatId);
-
-      // Generate title from first user message if this is a new chat (only 1-2 messages)
-      if (messages.length <= 2) {
-        const firstUserMessage = messages.find(m => m.role === "user")?.content;
-        if (firstUserMessage) {
-          // Use first 50 chars of the message as title
-          const title = firstUserMessage.length > 50 
-            ? firstUserMessage.slice(0, 50) + "..." 
-            : firstUserMessage;
-          
-          await supabaseAdmin
-            .from("company_brain_chats")
-            .update({ title })
-            .eq("id", chatId);
-        }
-      }
     }
 
     return NextResponse.json({
