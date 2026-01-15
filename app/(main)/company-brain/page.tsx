@@ -1,20 +1,18 @@
 "use client";
 
 import * as React from "react";
-import { Brain, MessageSquare, Inbox } from "lucide-react";
+import { Brain, MessageSquare, Inbox, RefreshCw } from "lucide-react";
 import { useOrganization } from "@clerk/nextjs";
 import { useSearchParams } from "next/navigation";
-import Link from "next/link";
 
 import PageHeader from "@/components/common/page-header";
 import { ManageSlackChannelsDialog } from "@/components/company-brain/manage-slack-channels-dialog";
-import { ManageDriveFoldersDialog } from "@/components/company-brain/manage-drive-folders-dialog";
-import { ManageUploadedFilesDialog } from "@/components/company-brain/manage-uploaded-files-dialog";
-import { ManageGmailAddressesDialog } from "@/components/company-brain/manage-gmail-addresses-dialog";
 import { ManageTldvDialog } from "@/components/company-brain/manage-tldv-dialog";
 import { BrainChat } from "@/components/company-brain/brain-chat";
+import { InboxCardStack } from "@/components/company-brain/inbox-card-stack";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 interface SlackChannel {
@@ -42,10 +40,13 @@ export default function CompanyBrainPage() {
   const { organization } = useOrganization();
   const searchParams = useSearchParams();
   const [mounted, setMounted] = React.useState(false);
+  const [activeTab, setActiveTab] = React.useState<"chat" | "inbox">("chat");
   const [channels, setChannels] = React.useState<SlackChannel[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
   const [tldvMeetings, setTldvMeetings] = React.useState<TldvMeeting[]>([]);
   const [isTldvLoading, setIsTldvLoading] = React.useState(true);
+  const [inboxCount, setInboxCount] = React.useState(0);
+  const [isSyncing, setIsSyncing] = React.useState(false);
 
   // Handle hydration mismatch by only reading searchParams after mount
   React.useEffect(() => {
@@ -53,6 +54,20 @@ export default function CompanyBrainPage() {
   }, []);
 
   const chatId = mounted ? searchParams.get("chat") : null;
+
+  // Fetch inbox count
+  const fetchInboxCount = React.useCallback(async () => {
+    if (!organization) return;
+    try {
+      const response = await fetch("/api/company-brain/inbox");
+      const data = await response.json();
+      if (response.ok) {
+        setInboxCount(data.count || 0);
+      }
+    } catch (error) {
+      console.error("Failed to fetch inbox count:", error);
+    }
+  }, [organization]);
 
   const fetchConnectedChannels = React.useCallback(async () => {
     if (!organization) return;
@@ -91,7 +106,8 @@ export default function CompanyBrainPage() {
   React.useEffect(() => {
     fetchConnectedChannels();
     fetchTldvMeetings();
-  }, [fetchConnectedChannels, fetchTldvMeetings]);
+    fetchInboxCount();
+  }, [fetchConnectedChannels, fetchTldvMeetings, fetchInboxCount]);
 
   const handleRemoveChannel = async (channelId: string) => {
     try {
@@ -132,6 +148,27 @@ export default function CompanyBrainPage() {
     }
   };
 
+  const handleSyncAll = async () => {
+    setIsSyncing(true);
+    try {
+      // Trigger both cron jobs in parallel
+      await Promise.all([
+        fetch("/api/cron/sync-slack"),
+        fetch("/api/cron/sync-tldv"),
+      ]);
+      // Refresh the data after sync
+      await Promise.all([
+        fetchConnectedChannels(),
+        fetchTldvMeetings(),
+        fetchInboxCount(),
+      ]);
+    } catch (error) {
+      console.error("Sync error:", error);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
   return (
     <>
       <PageHeader
@@ -145,22 +182,20 @@ export default function CompanyBrainPage() {
           {/* Top Bar - Fixed height */}
           <div className="flex items-center justify-between flex-shrink-0">
             {/* Left: Tabs */}
-            <Tabs value="chat">
+            <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "chat" | "inbox")}>
               <TabsList>
-                <TabsTrigger value="chat" className="gap-1.5" asChild>
-                  <Link href="/company-brain">
-                    <MessageSquare className="size-4" />
-                    Chat
-                  </Link>
+                <TabsTrigger value="chat" className="gap-1.5">
+                  <MessageSquare className="size-4" />
+                  Chat
                 </TabsTrigger>
-                <TabsTrigger value="inbox" className="gap-1.5" asChild>
-                  <Link href="/company-brain/inbox">
-                    <Inbox className="size-4" />
-                    Inbox
+                <TabsTrigger value="inbox" className="gap-1.5">
+                  <Inbox className="size-4" />
+                  Inbox
+                  {inboxCount > 0 && (
                     <Badge variant="default" className="h-5 min-w-6 px-1.5 rounded-md">
-                      3
+                      {inboxCount}
                     </Badge>
-                  </Link>
+                  )}
                 </TabsTrigger>
               </TabsList>
             </Tabs>
@@ -179,15 +214,35 @@ export default function CompanyBrainPage() {
                 onMeetingAdded={handleAddTldvMeeting}
                 onMeetingRemoved={handleRemoveTldvMeeting}
               />
-              <ManageDriveFoldersDialog />
-              <ManageGmailAddressesDialog />
-              <ManageUploadedFilesDialog />
+              <Button
+                variant="outline"
+                size="sm"
+                className="rounded-full"
+                onClick={handleSyncAll}
+                disabled={isSyncing}
+              >
+                <RefreshCw className={`size-4 ${isSyncing ? "animate-spin" : ""}`} />
+                {isSyncing ? "Syncing..." : "Sync"}
+              </Button>
             </div>
           </div>
 
           {/* Main Content Area */}
           <div className="flex flex-1 gap-4 overflow-hidden mt-0">
-            <BrainChat chatId={chatId} />
+            {activeTab === "chat" ? (
+              <BrainChat chatId={chatId} />
+            ) : (
+              <div className="flex flex-1 items-center justify-center">
+                <InboxCardStack 
+                  onCountChange={setInboxCount} 
+                  onApprove={() => {
+                    // Refresh data sources when an item is approved
+                    fetchTldvMeetings();
+                    fetchConnectedChannels();
+                  }}
+                />
+              </div>
+            )}
           </div>
         </Card>
       </div>

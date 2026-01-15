@@ -1,11 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import {
-  X,
-  Check,
-  Pencil,
-} from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
+import { X, Check, Pencil, Loader2 } from "lucide-react";
 import Image from "next/image";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -34,115 +30,27 @@ interface SourceData {
 
 interface InboxItem {
   id: string;
+  type: "topic" | "meeting";
+  title: string;
+  summary: string | null;
+  sourceData: Record<string, unknown>;
+  status: string;
+  topicId: string | null;
+  meetingId: string | null;
+  tldvUrl: string | null;
+  createdAt: string;
+}
+
+interface TransformedItem {
+  id: string;
   type: "slack" | "meeting" | "document";
   title: string;
   content: string;
   source: string;
   timestamp: Date;
   sources: SourceData[];
+  originalItem: InboxItem;
 }
-
-// Mock data
-const MOCK_ITEMS: InboxItem[] = [
-  {
-    id: "1",
-    type: "slack",
-    title: "Product Launch Discussion",
-    content: `## Launch Timeline
-
-We've decided to launch the **new feature next Monday**.
-
-### Action Items
-- **Marketing team** will prepare the announcement
-- **Dev team** needs to ensure all tests pass by Friday
-- QA sign-off required by Thursday EOD`,
-    source: "#product-team",
-    timestamp: new Date(Date.now() - 1000 * 60 * 30),
-    sources: [
-      {
-        id: "slack-1",
-        type: "slack",
-        count: 12,
-        items: [
-          { id: "msg-1", title: "Sarah in #product-team", preview: "We've decided to launch the new feature next Monday...", timestamp: new Date(Date.now() - 1000 * 60 * 30) },
-          { id: "msg-2", title: "Mike in #product-team", preview: "Marketing team will prepare the announcement", timestamp: new Date(Date.now() - 1000 * 60 * 35) },
-          { id: "msg-3", title: "Lisa in #product-team", preview: "Dev team needs to ensure all tests pass by Friday", timestamp: new Date(Date.now() - 1000 * 60 * 40) },
-        ],
-      },
-    ],
-  },
-  {
-    id: "2",
-    type: "meeting",
-    title: "Q4 Planning Meeting",
-    content: `## Key Decisions
-
-1. **Increase focus** on enterprise customers
-2. **Hire 3 new engineers** for the platform team
-3. **Launch mobile app** by end of Q4
-
-### Budget
-Budget approved for new infrastructure upgrades including:
-- Cloud scaling improvements
-- New monitoring tools
-- Security enhancements`,
-    source: "Leadership Sync",
-    timestamp: new Date(Date.now() - 1000 * 60 * 60 * 2),
-    sources: [
-      {
-        id: "tldv-1",
-        type: "tldv",
-        count: 2,
-        items: [
-          { id: "meeting-1", title: "Q4 Planning - Part 1", preview: "Discussion about enterprise focus and hiring plans", timestamp: new Date(Date.now() - 1000 * 60 * 60 * 2) },
-          { id: "meeting-2", title: "Q4 Planning - Part 2", preview: "Budget approval and infrastructure roadmap", timestamp: new Date(Date.now() - 1000 * 60 * 60 * 3) },
-        ],
-      },
-      {
-        id: "slack-2",
-        type: "slack",
-        count: 5,
-        items: [
-          { id: "msg-4", title: "CEO in #leadership", preview: "Great meeting today, key decisions captured", timestamp: new Date(Date.now() - 1000 * 60 * 60 * 1) },
-        ],
-      },
-    ],
-  },
-  {
-    id: "3",
-    type: "document",
-    title: "Engineering Best Practices",
-    content: `## Code Quality Standards
-
-All new code must follow these guidelines:
-
-- **Unit tests** required with >80% coverage
-- **PRs require** at least 2 approvals
-- **Deploy windows**: Tuesdays and Thursdays only
-
-> Critical hotfixes are exempt from deploy windows but require VP approval.`,
-    source: "Engineering Wiki",
-    timestamp: new Date(Date.now() - 1000 * 60 * 60 * 24),
-    sources: [
-      {
-        id: "drive-1",
-        type: "drive",
-        count: 1,
-        items: [
-          { id: "doc-1", title: "Engineering Standards.docx", preview: "Code quality standards and deployment guidelines", timestamp: new Date(Date.now() - 1000 * 60 * 60 * 24) },
-        ],
-      },
-      {
-        id: "slack-3",
-        type: "slack",
-        count: 8,
-        items: [
-          { id: "msg-5", title: "CTO in #engineering", preview: "Please review the updated best practices doc", timestamp: new Date(Date.now() - 1000 * 60 * 60 * 20) },
-        ],
-      },
-    ],
-  },
-];
 
 const sourceConfig = {
   slack: {
@@ -163,15 +71,140 @@ const sourceConfig = {
   },
 };
 
-export function InboxCardStack() {
-  const [items, setItems] = useState<InboxItem[]>(MOCK_ITEMS);
+function transformInboxItem(item: InboxItem): TransformedItem {
+  const sourceData = item.sourceData || {};
+
+  // Build sources array based on item type
+  const sources: SourceData[] = [];
+
+  if (item.type === "topic") {
+    // Slack topic
+    const messages = (sourceData.messages as Array<{ userName: string; text: string; timestamp: string }>) || [];
+    sources.push({
+      id: `slack-${item.id}`,
+      type: "slack",
+      count: (sourceData.messageCount as number) || messages.length,
+      items: messages.slice(0, 10).map((m, i) => ({
+        id: `msg-${i}`,
+        title: m.userName || "Unknown",
+        preview: m.text || "",
+        timestamp: new Date(m.timestamp),
+      })),
+    });
+
+    return {
+      id: item.id,
+      type: "slack",
+      title: item.title,
+      content: item.summary || "No summary available.",
+      source: `#${sourceData.channelName || "channel"}`,
+      timestamp: new Date(item.createdAt),
+      sources,
+      originalItem: item,
+    };
+  } else if (item.type === "meeting") {
+    // tldv meeting
+    sources.push({
+      id: `tldv-${item.id}`,
+      type: "tldv",
+      count: 1,
+      items: [
+        {
+          id: item.meetingId || item.id,
+          title: (sourceData.meetingTitle as string) || item.title,
+          preview: (sourceData.fullSummary as string)?.slice(0, 200) || "",
+          timestamp: new Date((sourceData.happenedAt as string) || item.createdAt),
+        },
+      ],
+    });
+
+    // Build content with action items and key topics
+    let content = item.summary || "No summary available.";
+
+    const keyTopics = sourceData.keyTopics as string[] | undefined;
+    const actionItems = sourceData.actionItems as string[] | undefined;
+
+    if (keyTopics && keyTopics.length > 0) {
+      content += "\n\n### Key Topics\n" + keyTopics.map((t) => `- ${t}`).join("\n");
+    }
+
+    if (actionItems && actionItems.length > 0) {
+      content += "\n\n### Action Items\n" + actionItems.map((a) => `- ${a}`).join("\n");
+    }
+
+    return {
+      id: item.id,
+      type: "meeting",
+      title: item.title,
+      content,
+      source: (sourceData.meetingTitle as string) || "Meeting",
+      timestamp: new Date((sourceData.happenedAt as string) || item.createdAt),
+      sources,
+      originalItem: item,
+    };
+  }
+
+  // Fallback
+  return {
+    id: item.id,
+    type: "document",
+    title: item.title,
+    content: item.summary || "No content available.",
+    source: "Unknown",
+    timestamp: new Date(item.createdAt),
+    sources: [],
+    originalItem: item,
+  };
+}
+
+interface InboxCardStackProps {
+  onCountChange?: (count: number) => void;
+  onApprove?: () => void;
+}
+
+export function InboxCardStack({ onCountChange, onApprove }: InboxCardStackProps) {
+  const [items, setItems] = useState<TransformedItem[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [exitDirection, setExitDirection] = useState<"left" | "right" | null>(null);
   const [isAnimating, setIsAnimating] = useState(false);
   const [editedContent, setEditedContent] = useState<string>("");
   const [isEditing, setIsEditing] = useState(false);
   const [selectedSource, setSelectedSource] = useState<SourceData | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const currentItem = items[0];
+
+  // Sync count with parent whenever items change
+  useEffect(() => {
+    onCountChange?.(items.length);
+  }, [items.length, onCountChange]);
+
+  // Fetch inbox items
+  const fetchItems = useCallback(async () => {
+    try {
+      setIsLoading(true);
+      setError(null);
+
+      const response = await fetch("/api/company-brain/inbox");
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to fetch inbox items");
+      }
+
+      const transformed = (data.items || []).map(transformInboxItem);
+      setItems(transformed);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load inbox");
+      setItems([]);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchItems();
+  }, [fetchItems]);
 
   // Reset edited content when current item changes
   useEffect(() => {
@@ -182,9 +215,17 @@ export function InboxCardStack() {
   }, [currentItem?.id]);
 
   const handleDisapprove = () => {
-    if (isAnimating) return;
+    if (isAnimating || !currentItem) return;
+
+    const itemId = currentItem.originalItem.id;
+
+    // Optimistic UI - immediately animate out
     setExitDirection("left");
     setIsAnimating(true);
+
+    // Fire and forget - API call in background
+    fetch(`/api/company-brain/inbox/${itemId}/dismiss`, { method: "POST" })
+      .catch((err) => console.error("Error dismissing item:", err));
 
     setTimeout(() => {
       setExitDirection(null);
@@ -194,15 +235,21 @@ export function InboxCardStack() {
   };
 
   const handleApprove = () => {
-    if (isAnimating) return;
+    if (isAnimating || !currentItem) return;
+
+    const itemId = currentItem.originalItem.id;
+
+    // Optimistic UI - immediately animate out
     setExitDirection("right");
     setIsAnimating(true);
 
-    // TODO: Save with edited content and sources
-    console.log("Approved:", {
-      ...currentItem,
-      content: editedContent,
-    });
+    // Fire and forget - API call in background, then refresh sources
+    fetch(`/api/company-brain/inbox/${itemId}/approve`, { method: "POST" })
+      .then(() => {
+        // Refresh data sources after successful approval
+        onApprove?.();
+      })
+      .catch((err) => console.error("Error approving item:", err));
 
     setTimeout(() => {
       setExitDirection(null);
@@ -210,6 +257,30 @@ export function InboxCardStack() {
       setIsAnimating(false);
     }, 400);
   };
+
+  if (isLoading) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full min-h-[400px]">
+        <Loader2 className="size-8 animate-spin text-muted-foreground mb-4" />
+        <p className="text-muted-foreground">Loading inbox...</p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full min-h-[400px] text-center">
+        <div className="rounded-full bg-destructive/10 p-5 mb-5">
+          <X className="size-10 text-destructive" />
+        </div>
+        <h3 className="text-xl font-semibold mb-2">Error loading inbox</h3>
+        <p className="text-muted-foreground max-w-sm text-sm mb-4">{error}</p>
+        <Button onClick={fetchItems} variant="outline">
+          Try Again
+        </Button>
+      </div>
+    );
+  }
 
   if (items.length === 0) {
     return (
@@ -228,9 +299,7 @@ export function InboxCardStack() {
   return (
     <div className="relative flex flex-col items-center h-full w-full px-4 pt-4 pb-20">
       {/* Counter */}
-      <div className="text-sm text-muted-foreground mb-6">
-        {items.length} remaining
-      </div>
+      <div className="text-sm text-muted-foreground mb-6">{items.length} remaining</div>
 
       {/* Card Stack */}
       <div className="relative w-full max-w-3xl flex-1 mb-4">
@@ -239,7 +308,9 @@ export function InboxCardStack() {
           <Card className="absolute inset-x-4 top-0 bottom-0 -translate-y-4 bg-card border shadow-md overflow-hidden">
             <div className="px-8 pt-6">
               <div className="flex items-center justify-between">
-                <h3 className="text-xl font-semibold tracking-tight opacity-60">{items[2].title}</h3>
+                <h3 className="text-xl font-semibold tracking-tight opacity-60">
+                  {items[2].title}
+                </h3>
               </div>
             </div>
           </Card>
@@ -248,7 +319,9 @@ export function InboxCardStack() {
           <Card className="absolute inset-x-2 top-0 bottom-0 -translate-y-2 bg-card border shadow-md overflow-hidden">
             <div className="px-8 pt-6">
               <div className="flex items-center justify-between">
-                <h3 className="text-xl font-semibold tracking-tight opacity-80">{items[1].title}</h3>
+                <h3 className="text-xl font-semibold tracking-tight opacity-80">
+                  {items[1].title}
+                </h3>
               </div>
             </div>
             <div className="px-8 mt-4">
@@ -303,7 +376,9 @@ export function InboxCardStack() {
                   {editedContent ? (
                     <MarkdownContent content={editedContent} />
                   ) : (
-                    <span className="italic text-muted-foreground/60 text-sm">Click to add notes...</span>
+                    <span className="italic text-muted-foreground/60 text-sm">
+                      Click to add notes...
+                    </span>
                   )}
                   <div className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity">
                     <Pencil className="size-4 text-muted-foreground/60" />
@@ -336,7 +411,7 @@ export function InboxCardStack() {
                       height={16}
                       className="size-4"
                     />
-                    {source.count} {source.count === 1 ? config.label.replace(/s$/, '') : config.label}
+                    {source.count} {source.count === 1 ? config.label.replace(/s$/, "") : config.label}
                   </Button>
                 );
               })}
@@ -366,10 +441,7 @@ export function InboxCardStack() {
           <ScrollArea className="max-h-[400px]">
             <div className="space-y-3">
               {selectedSource?.items.map((item) => (
-                <div
-                  key={item.id}
-                  className="p-3 rounded-lg bg-muted/50 border border-border/50"
-                >
+                <div key={item.id} className="p-3 rounded-lg bg-muted/50 border border-border/50">
                   <div className="flex items-center justify-between mb-1">
                     <span className="text-sm font-medium">{item.title}</span>
                     <span className="text-xs text-muted-foreground">
@@ -400,10 +472,7 @@ export function InboxCardStack() {
           Disapprove
         </Button>
 
-        <Button
-          onClick={handleApprove}
-          disabled={isAnimating}
-        >
+        <Button onClick={handleApprove} disabled={isAnimating}>
           <Check className="size-4" />
           Approve
         </Button>
@@ -411,4 +480,3 @@ export function InboxCardStack() {
     </div>
   );
 }
-

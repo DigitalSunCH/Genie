@@ -3,8 +3,10 @@
     {
       "path": "/api/cron/sync-slack",
       "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/cron/sync-tldv",
+      "schedule": "0 * * * *"
     }
   ]
 }
-
-

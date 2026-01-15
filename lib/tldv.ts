@@ -126,6 +126,110 @@ export async function fetchTranscript(meetingId: string): Promise<TldvTranscript
 }
 
 // =============================================================================
+// Meeting List API
+// =============================================================================
+
+export interface TldvMeetingsListResponse {
+  page: number;
+  pageSize: number;
+  pages: number;
+  total: number;
+  results: TldvMeetingMetadata[];
+}
+
+/**
+ * Fetch a single page of meetings from the tldv API
+ */
+export async function fetchMeetingsPage(page: number = 1): Promise<TldvMeetingsListResponse> {
+  const response = await fetch(`${TLDV_API_BASE}/meetings?page=${page}`, {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": getApiKey(),
+    },
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Failed to fetch meetings: ${response.status} ${errorText}`);
+  }
+
+  return response.json();
+}
+
+/**
+ * Fetch all meetings from the tldv API (with pagination)
+ * @param maxPages - Maximum number of pages to fetch (optional, for limiting large fetches)
+ */
+export async function fetchAllMeetings(maxPages?: number): Promise<TldvMeetingMetadata[]> {
+  const allMeetings: TldvMeetingMetadata[] = [];
+  
+  // Fetch first page to get total pages
+  const firstPage = await fetchMeetingsPage(1);
+  allMeetings.push(...firstPage.results);
+  
+  const totalPages = maxPages ? Math.min(firstPage.pages, maxPages) : firstPage.pages;
+  
+  // Fetch remaining pages
+  for (let page = 2; page <= totalPages; page++) {
+    const pageData = await fetchMeetingsPage(page);
+    allMeetings.push(...pageData.results);
+    
+    // Small delay to avoid rate limiting
+    if (page < totalPages) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  }
+  
+  return allMeetings;
+}
+
+/**
+ * Check if an email matches the organizer or any invitee of a meeting
+ */
+export function meetingHasAttendee(meeting: TldvMeetingMetadata, email: string): boolean {
+  const normalizedEmail = email.toLowerCase().trim();
+  
+  // Check organizer
+  if (meeting.organizer?.email?.toLowerCase() === normalizedEmail) {
+    return true;
+  }
+  
+  // Check invitees
+  if (meeting.invitees?.some((inv) => inv.email?.toLowerCase() === normalizedEmail)) {
+    return true;
+  }
+  
+  return false;
+}
+
+/**
+ * Filter meetings by attendee email (checks both organizer and invitees)
+ */
+export function filterMeetingsByEmail(
+  meetings: TldvMeetingMetadata[],
+  email: string
+): TldvMeetingMetadata[] {
+  if (!email.trim()) {
+    return meetings;
+  }
+  
+  return meetings.filter((meeting) => meetingHasAttendee(meeting, email));
+}
+
+/**
+ * Fetch meetings from tldv API filtered by attendee email
+ * This fetches all meetings and filters client-side since the API doesn't support email filtering
+ */
+export async function fetchMeetingsByAttendeeEmail(
+  email: string,
+  maxPages?: number
+): Promise<TldvMeetingMetadata[]> {
+  const allMeetings = await fetchAllMeetings(maxPages);
+  return filterMeetingsByEmail(allMeetings, email);
+}
+
+// =============================================================================
 // Token Estimation
 // =============================================================================
 

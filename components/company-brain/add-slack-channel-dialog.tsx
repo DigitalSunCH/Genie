@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Hash, Loader2, Lock, Plus, CheckCircle } from "lucide-react";
+import { Hash, Loader2, Lock, Plus, CheckCircle, Search } from "lucide-react";
 import { useOrganization } from "@clerk/nextjs";
 
 import {
@@ -14,6 +14,9 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { cn } from "@/lib/utils";
 
 interface SlackChannel {
   id: string;
@@ -24,17 +27,20 @@ interface SlackChannel {
 
 interface AddSlackChannelDialogProps {
   onChannelAdded?: () => void;
+  connectedChannelIds?: string[];
 }
 
 type SyncStatus = "idle" | "adding" | "syncing" | "complete" | "error";
 
 export function AddSlackChannelDialog({
   onChannelAdded,
+  connectedChannelIds = [],
 }: AddSlackChannelDialogProps) {
   const { organization } = useOrganization();
   const [open, setOpen] = React.useState(false);
   const [channels, setChannels] = React.useState<SlackChannel[]>([]);
   const [selectedChannel, setSelectedChannel] = React.useState<string>("");
+  const [searchQuery, setSearchQuery] = React.useState("");
   const [isLoading, setIsLoading] = React.useState(false);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -67,8 +73,18 @@ export function AddSlackChannelDialog({
     if (open) {
       fetchChannels();
       setSelectedChannel("");
+      setSearchQuery("");
     }
   }, [open, fetchChannels]);
+
+  // Filter channels based on search query
+  const filteredChannels = React.useMemo(() => {
+    if (!searchQuery.trim()) return channels;
+    const query = searchQuery.toLowerCase();
+    return channels.filter((channel) =>
+      channel.name.toLowerCase().includes(query)
+    );
+  }, [channels, searchQuery]);
 
   const handleSubmit = async () => {
     if (!selectedChannel || !organization) return;
@@ -201,42 +217,67 @@ export function AddSlackChannelDialog({
               workspace.
             </div>
           ) : (
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Channel</label>
+            <div className="space-y-3">
               <div className="relative">
-                <select
-                  value={selectedChannel}
-                  onChange={(e) => setSelectedChannel(e.target.value)}
-                  className="w-full h-10 px-3 pr-8 rounded-md border border-input bg-background text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 appearance-none cursor-pointer"
-                >
-                  <option value="">Select a channel...</option>
-                  {channels.map((channel) => (
-                    <option key={channel.id} value={channel.id}>
-                      {channel.is_private ? "🔒" : "#"} {channel.name}
-                    </option>
-                  ))}
-                </select>
-                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3">
-                  <svg
-                    className="size-4 text-muted-foreground"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M19 9l-7 7-7-7"
-                    />
-                  </svg>
-                </div>
-              </div>
-              {selectedChannel && (
-                <ChannelPreview
-                  channel={channels.find((c) => c.id === selectedChannel)!}
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search channels..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-9"
                 />
-              )}
+              </div>
+              <ScrollArea className="h-[250px] rounded-md border">
+                <div className="p-1">
+                  {filteredChannels.length === 0 ? (
+                    <div className="py-6 text-center text-sm text-muted-foreground">
+                      No channels found.
+                    </div>
+                  ) : (
+                    filteredChannels.map((channel) => {
+                      const isConnected = connectedChannelIds.includes(channel.id);
+                      return (
+                        <button
+                          key={channel.id}
+                          onClick={() => !isConnected && setSelectedChannel(channel.id)}
+                          disabled={isConnected}
+                          className={cn(
+                            "w-full flex items-center gap-3 rounded-md px-3 py-2 text-left text-sm transition-colors",
+                            isConnected
+                              ? "opacity-50 cursor-not-allowed"
+                              : selectedChannel === channel.id
+                                ? "bg-primary text-primary-foreground"
+                                : "hover:bg-muted"
+                          )}
+                        >
+                          {channel.is_private ? (
+                            <Lock className={cn(
+                              "size-4",
+                              !isConnected && selectedChannel === channel.id ? "text-primary-foreground" : "text-muted-foreground"
+                            )} />
+                          ) : (
+                            <Hash className={cn(
+                              "size-4",
+                              !isConnected && selectedChannel === channel.id ? "text-primary-foreground" : "text-muted-foreground"
+                            )} />
+                          )}
+                          <span className="flex-1 truncate">{channel.name}</span>
+                          {isConnected ? (
+                            <span className="text-xs text-muted-foreground">Added</span>
+                          ) : (
+                            <span className={cn(
+                              "text-xs",
+                              selectedChannel === channel.id ? "text-primary-foreground/70" : "text-muted-foreground"
+                            )}>
+                              {channel.num_members} members
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
+              </ScrollArea>
             </div>
           )}
         </div>

@@ -1,7 +1,6 @@
-import { NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import Anthropic from "@anthropic-ai/sdk";
-import { searchCompanyBrain, CompanyBrainSearchResult } from "@/lib/pinecone";
+import { searchCompanyBrain } from "@/lib/pinecone";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { formatTime } from "@/lib/tldv";
 
@@ -9,7 +8,7 @@ const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
 });
 
-// Define the search_company_brain tool
+// Define tools for Claude
 const tools: Anthropic.Tool[] = [
   {
     name: "search_company_brain",
@@ -38,25 +37,87 @@ const tools: Anthropic.Tool[] = [
       required: ["query"],
     },
   },
+  {
+    name: "web_search",
+    description:
+      "Search the web for current information, news, or topics not found in the company knowledge base. Use this for external information like industry news, competitor research, technology documentation, market trends, or any general questions that require up-to-date information from the internet.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        query: {
+          type: "string",
+          description: "The search query to find information on the web",
+        },
+      },
+      required: ["query"],
+    },
+  },
 ];
 
 const getSystemPrompt = () => {
-  const today = new Date().toISOString().split('T')[0];
-  return `You are the Company Brain assistant - an AI that helps users find and understand information from their company's connected data sources including Slack channels, tl;dv meeting recordings, and documents.
+  const now = new Date();
+  const today = now.toISOString().split('T')[0];
+  const currentTime = now.toLocaleTimeString('en-US', { 
+    hour: '2-digit', 
+    minute: '2-digit', 
+    hour12: true,
+    timeZone: 'Europe/Berlin'
+  });
+  const dayOfWeek = now.toLocaleDateString('en-US', { weekday: 'long', timeZone: 'Europe/Berlin' });
+  
+  return `You are the Company Brain assistant - an AI that helps users find and understand information from their company's connected data sources including Slack channels, tl;dv meeting recordings, and documents. You can also search the web for external information.
 
-Today's date is ${today}.
+## Current Date & Time (Authoritative - DO NOT use web search for this)
+- **Today**: ${dayOfWeek}, ${today}
+- **Current Time**: ${currentTime} (Europe/Berlin timezone)
 
-When users ask questions about internal discussions, decisions, projects, team updates, or company knowledge:
-1. Use the search_company_brain tool to find relevant information
-2. For time-based queries like "last week", "yesterday", "this month", calculate the appropriate start_date and end_date
+IMPORTANT: For ANY questions about the current date, time, day of week, or "what day is it" - use the information above directly. Do NOT use web_search for time/date queries as web results may be outdated or incorrect.
+
+## When to Use Each Tool
+
+**search_company_brain** - Use for:
+- Internal discussions, decisions, and projects
+- Team updates and company knowledge
+- What was discussed in meetings or Slack
+- For time-based queries like "last week", "yesterday", etc., calculate dates based on today's date (${today})
+
+**web_search** - Use for:
+- Industry news and market trends
+- Competitor research
+- Technology documentation and tutorials
+- Current events and external information
+- General knowledge questions
+- Anything not specific to the company's internal data
+- NEVER use for time/date queries - use the authoritative date/time provided above
+
+## Guidelines
+
+1. Choose the right tool based on whether the question is about internal company matters or external information
+2. You can use both tools if needed (e.g., comparing internal strategy to industry trends)
 3. Synthesize the results into a clear, helpful answer
 4. Always cite your sources:
    - For Slack: mention the channel name, who said it, and when
-   - For meeting recordings: mention the meeting title, speaker, and timestamp in the recording
+   - For meeting recordings: mention the meeting title, speaker, and timestamp
+   - For web results: mention the source title and provide context
 
-When you don't find relevant information, be honest and let the user know. For general questions not related to company knowledge, you can answer directly without searching.
+When you don't find relevant information, be honest and let the user know.
 
-Be conversational, helpful, and concise.`;
+## Response Formatting Guidelines
+
+Always format your responses using rich markdown for readability:
+
+- **Use headings** (## or ###) to organize different sections or topics
+- **Bold important terms**, names, dates, and key takeaways using **double asterisks**
+- Use *italics* for emphasis or quotes from sources
+- Structure information with:
+  - **Bullet points** for lists of items, features, or multiple points
+  - **Numbered lists** for sequential steps or ranked items
+- Use \`code formatting\` for technical terms, commands, or specific identifiers
+- When summarizing from multiple sources, group related information under clear headings
+- Add horizontal rules (---) to separate distinct topics when needed
+- For quotes from Slack or meetings, use blockquotes (> quote text)
+
+Keep responses well-organized, scannable, and visually clear. Avoid walls of plain text.`;
 };
 
 interface ChatMessage {
@@ -86,268 +147,365 @@ interface TldvSource {
   endTime?: number;
 }
 
-type Source = SlackSource | TldvSource;
+interface WebSource {
+  type: "web";
+  title: string;
+  url: string;
+  content: string;
+}
+
+type Source = SlackSource | TldvSource | WebSource;
+
+// Helper to send SSE event
+function sendEvent(controller: ReadableStreamDefaultController, event: string, data: unknown) {
+  const encoder = new TextEncoder();
+  controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
+}
 
 export async function POST(request: Request) {
-  try {
-    const { orgId, userId } = await auth();
+  const { orgId, userId } = await auth();
 
-    if (!orgId || !userId) {
-      return NextResponse.json(
-        { error: "Unauthorized - no organization selected" },
-        { status: 401 }
-      );
+  if (!orgId || !userId) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), { 
+      status: 401,
+      headers: { "Content-Type": "application/json" }
+    });
+  }
+
+  const { messages, model, chatId, userMessage, enabledTools } = (await request.json()) as {
+    messages: ChatMessage[];
+    model?: string;
+    chatId?: string;
+    userMessage?: string;
+    enabledTools?: string[];
+  };
+
+  if (!messages || messages.length === 0) {
+    return new Response(JSON.stringify({ error: "Messages are required" }), { 
+      status: 400,
+      headers: { "Content-Type": "application/json" }
+    });
+  }
+
+  // Track sources used during this request
+  const sources: Source[] = [];
+
+  // Verify chat access and save user message
+  if (chatId) {
+    const { data: chat, error: chatError } = await supabaseAdmin
+      .from("company_brain_chats")
+      .select("id, created_by")
+      .eq("id", chatId)
+      .eq("organization_id", orgId)
+      .single();
+
+    if (chatError || !chat) {
+      return new Response(JSON.stringify({ error: "Chat not found" }), { 
+        status: 404,
+        headers: { "Content-Type": "application/json" }
+      });
     }
 
-    const { messages, model, chatId, userMessage } = (await request.json()) as {
-      messages: ChatMessage[];
-      model?: string;
-      chatId?: string;
-      userMessage?: string; // The latest user message to save
-    };
-
-    if (!messages || messages.length === 0) {
-      return NextResponse.json(
-        { error: "Messages are required" },
-        { status: 400 }
-      );
-    }
-
-    // Track sources used during this request
-    const sources: Source[] = [];
-
-    // If we have a chatId, verify it belongs to the current organization and user has access
-    if (chatId) {
-      const { data: chat, error: chatError } = await supabaseAdmin
-        .from("company_brain_chats")
-        .select("id, created_by")
-        .eq("id", chatId)
-        .eq("organization_id", orgId)
+    const isOwner = chat.created_by === userId;
+    if (!isOwner) {
+      const { data: share } = await supabaseAdmin
+        .from("company_brain_chat_shares")
+        .select("id")
+        .eq("chat_id", chatId)
+        .eq("user_id", userId)
         .single();
 
-      if (chatError || !chat) {
-        return NextResponse.json(
-          { error: "Chat not found or access denied" },
-          { status: 404 }
-        );
-      }
-
-      // Verify user has access (owner or shared with)
-      const isOwner = chat.created_by === userId;
-      if (!isOwner) {
-        const { data: share } = await supabaseAdmin
-          .from("company_brain_chat_shares")
-          .select("id")
-          .eq("chat_id", chatId)
-          .eq("user_id", userId)
-          .single();
-
-        if (!share) {
-          return NextResponse.json(
-            { error: "Access denied" },
-            { status: 403 }
-          );
-        }
-      }
-
-      // Save the user message
-      if (userMessage) {
-        await supabaseAdmin.from("company_brain_messages").insert({
-          chat_id: chatId,
-          role: "user",
-          content: userMessage,
+      if (!share) {
+        return new Response(JSON.stringify({ error: "Access denied" }), { 
+          status: 403,
+          headers: { "Content-Type": "application/json" }
         });
-
-        // Update chat's updated_at and title (if first message)
-        const updateData: { updated_at: string; title?: string } = {
-          updated_at: new Date().toISOString(),
-        };
-
-        // Generate title from first user message if this is a new chat
-        if (messages.length <= 2) {
-          const firstUserMessage = messages.find(m => m.role === "user")?.content;
-          if (firstUserMessage) {
-            updateData.title = firstUserMessage.length > 50 
-              ? firstUserMessage.slice(0, 50) + "..." 
-              : firstUserMessage;
-          }
-        }
-
-        await supabaseAdmin
-          .from("company_brain_chats")
-          .update(updateData)
-          .eq("id", chatId);
       }
     }
 
-    // Convert messages to Anthropic format
-    const anthropicMessages: Anthropic.MessageParam[] = messages.map((msg) => ({
-      role: msg.role,
-      content: msg.content,
-    }));
+    if (userMessage) {
+      await supabaseAdmin.from("company_brain_messages").insert({
+        chat_id: chatId,
+        role: "user",
+        content: userMessage,
+      });
 
-    const systemPrompt = getSystemPrompt();
+      const updateData: { updated_at: string; status: string; title?: string } = {
+        updated_at: new Date().toISOString(),
+        status: "loading",
+      };
 
-    // Initial request to Claude
-    let response = await anthropic.messages.create({
-      model: model || "claude-sonnet-4-20250514",
-      max_tokens: 4096,
-      system: systemPrompt,
-      tools,
-      messages: anthropicMessages,
-    });
+      if (messages.length <= 2) {
+        const firstUserMessage = messages.find(m => m.role === "user")?.content;
+        if (firstUserMessage) {
+          updateData.title = firstUserMessage.length > 50 
+            ? firstUserMessage.slice(0, 50) + "..." 
+            : firstUserMessage;
+        }
+      }
 
-    // Handle tool use loop - must handle ALL tool_use blocks in each response
-    while (response.stop_reason === "tool_use") {
-      // Get ALL tool_use blocks (not just the first one)
-      const toolUseBlocks = response.content.filter(
-        (block): block is Anthropic.ToolUseBlock => block.type === "tool_use"
-      );
+      await supabaseAdmin
+        .from("company_brain_chats")
+        .update(updateData)
+        .eq("id", chatId);
+    }
+  }
 
-      if (toolUseBlocks.length === 0) break;
+  // Create streaming response
+  const stream = new ReadableStream({
+    async start(controller) {
+      try {
+        const anthropicMessages: Anthropic.MessageParam[] = messages.map((msg) => ({
+          role: msg.role,
+          content: msg.content,
+        }));
 
-      // Process each tool use and collect results
-      const toolResults: Anthropic.ToolResultBlockParam[] = [];
+        const activeTools = enabledTools && enabledTools.length > 0
+          ? tools.filter(tool => enabledTools.includes(tool.name))
+          : tools;
 
-      for (const toolUseBlock of toolUseBlocks) {
-        let toolResult: string;
+        const systemPrompt = getSystemPrompt();
+        let currentMessages = [...anthropicMessages];
+        let finalText = "";
 
-        if (toolUseBlock.name === "search_company_brain") {
-          const input = toolUseBlock.input as {
-            query: string;
-            channel_name?: string;
-            start_date?: string;
-            end_date?: string;
-          };
+        // Tool execution loop
+        let continueLoop = true;
+        while (continueLoop) {
+          // Non-streaming call to detect tool use
+          const response = await anthropic.messages.create({
+            model: model || "claude-sonnet-4-20250514",
+            max_tokens: 4096,
+            system: systemPrompt,
+            tools: activeTools.length > 0 ? activeTools : undefined,
+            messages: currentMessages,
+          });
 
-          try {
-            const searchResults = await searchCompanyBrain(orgId, input.query, {
-              topK: 10,
-              startDate: input.start_date,
-              endDate: input.end_date,
-            });
+          if (response.stop_reason === "tool_use") {
+            const toolUseBlocks = response.content.filter(
+              (block): block is Anthropic.ToolUseBlock => block.type === "tool_use"
+            );
 
-            if (searchResults.length === 0) {
-              toolResult = "No relevant information found in the Company Brain for this query.";
-            } else {
-              // Track sources and format results for Claude
-              const formattedResults: string[] = [];
+            const toolResults: Anthropic.ToolResultBlockParam[] = [];
 
-              for (let i = 0; i < searchResults.length; i++) {
-                const result = searchResults[i];
-                const date = new Date(result.timestamp).toLocaleDateString();
+            for (const toolUseBlock of toolUseBlocks) {
+              // Send tool_start event
+              sendEvent(controller, "tool_start", { 
+                tool: toolUseBlock.name,
+                query: (toolUseBlock.input as { query?: string }).query || ""
+              });
 
-                if (result.sourceType === "slack") {
-                  // Slack source
-                  sources.push({
-                    type: "slack",
-                    channelName: result.channelName || "",
-                    userName: result.userName || "",
-                    timestamp: result.timestamp,
-                    text: result.text,
-                    slackLink: result.slackLink || "",
-                    isThread: result.isThread || false,
+              let toolResult: string;
+
+              if (toolUseBlock.name === "search_company_brain") {
+                const input = toolUseBlock.input as {
+                  query: string;
+                  channel_name?: string;
+                  start_date?: string;
+                  end_date?: string;
+                };
+
+                try {
+                  const searchResults = await searchCompanyBrain(orgId, input.query, {
+                    topK: 10,
+                    startDate: input.start_date,
+                    endDate: input.end_date,
                   });
 
-                  formattedResults.push(`[Result ${i + 1} - Slack]
+                  if (searchResults.length === 0) {
+                    toolResult = "No relevant information found in the Company Brain for this query.";
+                  } else {
+                    const formattedResults: string[] = [];
+
+                    for (let i = 0; i < searchResults.length; i++) {
+                      const result = searchResults[i];
+                      const date = new Date(result.timestamp).toLocaleDateString();
+
+                      if (result.sourceType === "slack") {
+                        sources.push({
+                          type: "slack",
+                          channelName: result.channelName || "",
+                          userName: result.userName || "",
+                          timestamp: result.timestamp,
+                          text: result.text,
+                          slackLink: result.slackLink || "",
+                          isThread: result.isThread || false,
+                        });
+
+                        formattedResults.push(`[Result ${i + 1} - Slack]
 Channel: #${result.channelName}
 From: ${result.userName}
 Date: ${date}
 Content: ${result.text}
 ${result.isThread ? "(This is part of a thread)" : ""}`);
-                } else if (result.sourceType === "tldv") {
-                  // tldv meeting source
-                  sources.push({
-                    type: "tldv",
-                    meetingTitle: result.meetingTitle || "",
-                    speaker: result.speaker,
-                    timestamp: result.timestamp,
-                    text: result.text,
-                    tldvUrl: result.tldvUrl,
-                    startTime: result.startTime,
-                    endTime: result.endTime,
-                  });
+                      } else if (result.sourceType === "tldv") {
+                        sources.push({
+                          type: "tldv",
+                          meetingTitle: result.meetingTitle || "",
+                          speaker: result.speaker,
+                          timestamp: result.timestamp,
+                          text: result.text,
+                          tldvUrl: result.tldvUrl,
+                          startTime: result.startTime,
+                          endTime: result.endTime,
+                        });
 
-                  const timeRange = result.startTime !== undefined && result.endTime !== undefined
-                    ? ` (${formatTime(result.startTime)}-${formatTime(result.endTime)})`
-                    : "";
+                        const timeRange = result.startTime !== undefined && result.endTime !== undefined
+                          ? ` (${formatTime(result.startTime)}-${formatTime(result.endTime)})`
+                          : "";
 
-                  formattedResults.push(`[Result ${i + 1} - Meeting Recording]
+                        formattedResults.push(`[Result ${i + 1} - Meeting Recording]
 Meeting: ${result.meetingTitle}
 ${result.speaker ? `Speaker: ${result.speaker}${timeRange}` : ""}
 Date: ${date}
 Content: ${result.text}`);
+                      }
+                    }
+
+                    toolResult = formattedResults.join("\n\n---\n\n");
+                  }
+                } catch (error) {
+                  console.error("Search error:", error);
+                  toolResult = "Error searching the Company Brain. Please try again.";
                 }
+              } else if (toolUseBlock.name === "web_search") {
+                const input = toolUseBlock.input as { query: string };
+
+                try {
+                  const webResponse = await fetch("https://api.tavily.com/search", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      api_key: process.env.TAVILY_API_KEY,
+                      query: input.query,
+                      search_depth: "basic",
+                      max_results: 5,
+                    }),
+                  });
+
+                  const data = await webResponse.json();
+
+                  if (data.results && data.results.length > 0) {
+                    const formattedResults: string[] = [];
+
+                    for (let i = 0; i < data.results.length; i++) {
+                      const result = data.results[i];
+                      
+                      sources.push({
+                        type: "web",
+                        title: result.title,
+                        url: result.url,
+                        content: result.content,
+                      });
+
+                      formattedResults.push(`[Result ${i + 1} - Web]
+Title: ${result.title}
+URL: ${result.url}
+Content: ${result.content}`);
+                    }
+
+                    toolResult = formattedResults.join("\n\n---\n\n");
+                  } else {
+                    toolResult = "No web results found for this query.";
+                  }
+                } catch (error) {
+                  console.error("Web search error:", error);
+                  toolResult = "Error performing web search. Please try again.";
+                }
+              } else {
+                toolResult = `Unknown tool: ${toolUseBlock.name}`;
               }
 
-              toolResult = formattedResults.join("\n\n---\n\n");
+              // Send tool_end event
+              sendEvent(controller, "tool_end", { tool: toolUseBlock.name });
+
+              toolResults.push({
+                type: "tool_result",
+                tool_use_id: toolUseBlock.id,
+                content: toolResult,
+              });
             }
-          } catch (error) {
-            console.error("Search error:", error);
-            toolResult = "Error searching the Company Brain. Please try again.";
+
+            // Update messages for next iteration
+            currentMessages = [
+              ...currentMessages,
+              { role: "assistant" as const, content: response.content },
+              { role: "user" as const, content: toolResults },
+            ];
+          } else {
+            // No more tool use - time to stream the final response
+            continueLoop = false;
+            
+            // Send generating event
+            sendEvent(controller, "generating", {});
+
+            // Now stream the final response
+            const streamResponse = anthropic.messages.stream({
+              model: model || "claude-sonnet-4-20250514",
+              max_tokens: 4096,
+              system: systemPrompt,
+              tools: activeTools.length > 0 ? activeTools : undefined,
+              messages: currentMessages,
+            });
+
+            for await (const event of streamResponse) {
+              if (event.type === "content_block_delta") {
+                const delta = event.delta;
+                if ("text" in delta) {
+                  finalText += delta.text;
+                  sendEvent(controller, "text_delta", { text: delta.text });
+                }
+              }
+            }
           }
-        } else {
-          toolResult = `Unknown tool: ${toolUseBlock.name}`;
         }
 
-        // Add this tool's result to the collection
-        toolResults.push({
-          type: "tool_result",
-          tool_use_id: toolUseBlock.id,
-          content: toolResult,
+        // Send sources
+        if (sources.length > 0) {
+          sendEvent(controller, "sources", sources);
+        }
+
+        // Save to database
+        if (chatId && finalText) {
+          await supabaseAdmin.from("company_brain_messages").insert({
+            chat_id: chatId,
+            role: "assistant",
+            content: finalText,
+            sources: sources.length > 0 ? sources : null,
+          });
+
+          await supabaseAdmin
+            .from("company_brain_chats")
+            .update({ updated_at: new Date().toISOString(), status: "idle" })
+            .eq("id", chatId);
+        }
+
+        // Send done event
+        sendEvent(controller, "done", {});
+        controller.close();
+      } catch (error) {
+        console.error("Streaming error:", error);
+        sendEvent(controller, "error", { 
+          message: error instanceof Error ? error.message : "Unknown error" 
         });
+        
+        // Reset chat status on error
+        if (chatId) {
+          await supabaseAdmin
+            .from("company_brain_chats")
+            .update({ status: "idle" })
+            .eq("id", chatId);
+        }
+        
+        controller.close();
       }
+    },
+  });
 
-      // Continue conversation with ALL tool results
-      response = await anthropic.messages.create({
-        model: model || "claude-sonnet-4-20250514",
-        max_tokens: 4096,
-        system: systemPrompt,
-        tools,
-        messages: [
-          ...anthropicMessages,
-          { role: "assistant", content: response.content },
-          {
-            role: "user",
-            content: toolResults,
-          },
-        ],
-      });
-    }
-
-    // Extract the final text response
-    const textBlock = response.content.find(
-      (block): block is Anthropic.TextBlock => block.type === "text"
-    );
-
-    const assistantMessage = textBlock?.text || "I apologize, but I couldn't generate a response.";
-
-    // Save assistant message to database if we have a chatId
-    if (chatId) {
-      await supabaseAdmin.from("company_brain_messages").insert({
-        chat_id: chatId,
-        role: "assistant",
-        content: assistantMessage,
-        sources: sources.length > 0 ? sources : null,
-      });
-
-      // Update chat's updated_at
-      await supabaseAdmin
-        .from("company_brain_chats")
-        .update({ updated_at: new Date().toISOString() })
-        .eq("id", chatId);
-    }
-
-    return NextResponse.json({
-      message: assistantMessage,
-      sources: sources,
-    });
-  } catch (error) {
-    console.error("Chat error:", error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Unknown error" },
-      { status: 500 }
-    );
-  }
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      "Connection": "keep-alive",
+    },
+  });
 }
-

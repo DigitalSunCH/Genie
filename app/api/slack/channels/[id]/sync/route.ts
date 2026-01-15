@@ -331,11 +331,20 @@ export async function POST(
     // Upsert records to Pinecone
     const { upsertedCount } = await upsertSlackMessages(orgId, records);
 
-    // Update last_synced_at in database
+    // Find the latest message timestamp for tracking new messages
+    let latestTs: string | null = null;
+    for (const msg of validMessages) {
+      if (!latestTs || parseFloat(msg.ts) > parseFloat(latestTs)) {
+        latestTs = msg.ts;
+      }
+    }
+
+    // Update last_synced_at and last_synced_message_ts in database
     await supabaseAdmin
       .from("slack_channels")
       .update({ 
         last_synced_at: new Date().toISOString(),
+        last_synced_message_ts: latestTs,
         updated_at: new Date().toISOString(),
       })
       .eq("id", id);

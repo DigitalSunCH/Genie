@@ -91,7 +91,10 @@ export function ManageSlackChannelsDialog({
           ) : channels.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
               <p className="mb-4">No channels connected yet.</p>
-              <AddSlackChannelDialog onChannelAdded={onChannelAdded} />
+              <AddSlackChannelDialog 
+                onChannelAdded={onChannelAdded} 
+                connectedChannelIds={[]}
+              />
             </div>
           ) : (
             <ScrollArea className="max-h-[300px]">
@@ -155,7 +158,10 @@ export function ManageSlackChannelsDialog({
 
         {channels.length > 0 && (
           <div className="flex justify-end">
-            <AddSlackChannelDialog onChannelAdded={onChannelAdded} />
+            <AddSlackChannelDialog 
+              onChannelAdded={onChannelAdded} 
+              connectedChannelIds={channels.map(c => c.slack_channel_id)}
+            />
           </div>
         )}
       </DialogContent>
