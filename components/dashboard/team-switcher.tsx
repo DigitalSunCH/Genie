@@ -1,9 +1,10 @@
 "use client"
 
 import * as React from "react"
-import { ChevronsUpDown, Plus, Building2, Settings } from "lucide-react"
-import { useOrganization, useOrganizationList, OrganizationProfile, CreateOrganization } from "@clerk/nextjs"
+import { ChevronsUpDown, Plus, Building2, Settings, ChartNoAxesColumn } from "lucide-react"
+import { useOrganization, useOrganizationList, OrganizationProfile, CreateOrganization, useUser } from "@clerk/nextjs"
 import Image from "next/image"
+import { supabase } from "@/lib/supabaseClient"
 
 import {
   DropdownMenu,
@@ -28,6 +29,7 @@ import {
 export function TeamSwitcher() {
   const { isMobile } = useSidebar()
   const { organization: activeOrg } = useOrganization()
+  const { user } = useUser()
   const { userMemberships, setActive, isLoaded } = useOrganizationList({
     userMemberships: {
       infinite: true,
@@ -35,6 +37,26 @@ export function TeamSwitcher() {
   })
   const [settingsOpen, setSettingsOpen] = React.useState(false)
   const [createOrgOpen, setCreateOrgOpen] = React.useState(false)
+  const [isAdmin, setIsAdmin] = React.useState(false)
+
+  // Check if user is an admin
+  React.useEffect(() => {
+    async function checkAdminStatus() {
+      if (!user?.id) return
+      
+      const { data, error } = await supabase
+        .from('admin_users')
+        .select('id')
+        .eq('user_id', user.id)
+        .single()
+      
+      if (data && !error) {
+        setIsAdmin(true)
+      }
+    }
+    
+    checkAdminStatus()
+  }, [user?.id])
 
   // Fetch all pages of organizations
   React.useEffect(() => {
@@ -150,6 +172,20 @@ export function TeamSwitcher() {
               side={isMobile ? "bottom" : "right"}
               sideOffset={4}
             >
+              {isAdmin && (
+                <>
+                  <DropdownMenuItem
+                    className="gap-2 p-2"
+                    onClick={() => window.location.href = '/admin'}
+                  >
+                    <div className="flex size-6 items-center justify-center rounded-md bg-gradient-to-b from-zinc-300 via-zinc-500 to-zinc-600 shadow-sm">
+                      <ChartNoAxesColumn className="size-3.5 text-zinc-900" />
+                    </div>
+                    <span className="font-medium">Admin Dashboard</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                </>
+              )}
               <DropdownMenuLabel className="text-muted-foreground text-xs">
                 Organizations
               </DropdownMenuLabel>

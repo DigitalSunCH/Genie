@@ -1,20 +1,8 @@
 "use client";
 
-import {
-  ArrowUp,
-  Sparkles,
-  Zap,
-  Brain,
-  Check,
-  ChevronDown,
-  Plus,
-  Search,
-  Calculator,
-  Globe,
-  FileText,
-  X,
-} from "lucide-react";
-import { useState } from "react";
+import { ArrowUp, Check, ChevronDown, Globe, Brain } from "lucide-react";
+import Image from "next/image";
+import { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -28,46 +16,21 @@ const AI_MODELS = [
     id: "claude-opus-4-20250514",
     name: "Claude Opus 4.5",
     description: "Most intelligent, best for complex tasks",
-    icon: Brain,
-  },
-  {
-    id: "claude-sonnet-4-20250514",
-    name: "Claude Sonnet 4",
-    description: "Great balance of speed and intelligence",
-    icon: Sparkles,
-  },
-  {
-    id: "gpt-4o",
-    name: "GPT-4o",
-    description: "OpenAI's most capable model",
-    icon: Zap,
   },
 ] as const;
 
 const TOOLS = [
   {
-    id: "web-search",
+    id: "search_company_brain",
+    name: "Company Brain",
+    description: "Search Slack, meetings, and internal docs",
+    icon: Brain,
+  },
+  {
+    id: "web_search",
     name: "Web Search",
-    description: "Search the internet for information",
+    description: "Search the internet for external info",
     icon: Globe,
-  },
-  {
-    id: "calculator",
-    name: "Calculator",
-    description: "Perform calculations and math",
-    icon: Calculator,
-  },
-  {
-    id: "document-search",
-    name: "Document Search",
-    description: "Search through your documents",
-    icon: FileText,
-  },
-  {
-    id: "knowledge-search",
-    name: "Knowledge Search",
-    description: "Search the company knowledge base",
-    icon: Search,
   },
 ] as const;
 
@@ -76,27 +39,38 @@ type ToolId = (typeof TOOLS)[number]["id"];
 
 interface ChatInputProps {
   className?: string;
-  onSendMessage?: (message: string, model: string) => void;
+  onSendMessage?: (message: string, model: string, enabledTools: string[]) => void;
   disabled?: boolean;
+  large?: boolean;
+  autoFocus?: boolean;
 }
 
 export function ChatInput({
   className,
   onSendMessage,
   disabled = false,
+  large = false,
+  autoFocus = false,
 }: ChatInputProps) {
   const [message, setMessage] = useState("");
   const [selectedModel, setSelectedModel] = useState<AIModelId>("claude-opus-4-20250514");
-  const [selectedTools, setSelectedTools] = useState<ToolId[]>([]);
+  const [enabledTools, setEnabledTools] = useState<ToolId[]>(["search_company_brain", "web_search"]);
   const [isModelPopoverOpen, setIsModelPopoverOpen] = useState(false);
-  const [isToolPopoverOpen, setIsToolPopoverOpen] = useState(false);
+  const [isToolsPopoverOpen, setIsToolsPopoverOpen] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Auto-focus textarea when requested
+  useEffect(() => {
+    if (autoFocus && textareaRef.current) {
+      textareaRef.current.focus();
+    }
+  }, [autoFocus]);
 
   const currentModel = AI_MODELS.find((m) => m.id === selectedModel)!;
-  const availableTools = TOOLS.filter((t) => !selectedTools.includes(t.id));
 
   const handleSend = () => {
     if (message.trim() && !disabled) {
-      onSendMessage?.(message.trim(), selectedModel);
+      onSendMessage?.(message.trim(), selectedModel, enabledTools);
       setMessage("");
     }
   };
@@ -113,32 +87,40 @@ export function ChatInput({
     setIsModelPopoverOpen(false);
   };
 
-  const handleSelectTool = (toolId: ToolId) => {
-    setSelectedTools((prev) => [...prev, toolId]);
-    setIsToolPopoverOpen(false);
+  const handleToggleTool = (toolId: ToolId) => {
+    setEnabledTools((prev) =>
+      prev.includes(toolId)
+        ? prev.filter((id) => id !== toolId)
+        : [...prev, toolId]
+    );
   };
 
-  const handleRemoveTool = (toolId: ToolId) => {
-    setSelectedTools((prev) => prev.filter((id) => id !== toolId));
+  const getToolsLabel = () => {
+    if (enabledTools.length === 0) return "No tools";
+    if (enabledTools.length === TOOLS.length) return "All tools";
+    return `${enabledTools.length} tool${enabledTools.length !== 1 ? "s" : ""}`;
   };
 
   return (
     <div
-      className={`sticky bottom-0 p-4 bg-card/95 backdrop-blur-sm ${className}`}
+      className={`sticky bottom-0 p-4 max-w-4xl mx-auto w-full ${className}`}
     >
       <div className="relative">
         <Textarea
+          ref={textareaRef}
           value={message}
           onChange={(e) => setMessage(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder="Ask the Company Brain..."
-          className="pr-12 border-border min-h-12 max-h-32 rounded-2xl resize-none py-3 mt-0"
+          className={`pr-12 border-border rounded-2xl resize-none py-3 mt-0 !bg-muted ${
+            large ? "min-h-[120px] max-h-48 text-lg" : "min-h-12 max-h-32"
+          }`}
           disabled={disabled}
           style={{
             scrollbarWidth: "thin",
             scrollbarColor: "#737373 transparent",
           }}
-          rows={1}
+          rows={large ? 3 : 1}
         />
         <Button
           onClick={handleSend}
@@ -155,7 +137,7 @@ export function ChatInput({
       </div>
 
       {/* Action buttons below input */}
-      <div className="flex items-center gap-2 mt-2 flex-wrap">
+      <div className="flex items-center gap-2 mt-2 flex-wrap bg-muted rounded-full px-2 py-1 w-fit">
         {/* AI Model Selector */}
         <Popover open={isModelPopoverOpen} onOpenChange={setIsModelPopoverOpen}>
           <PopoverTrigger asChild>
@@ -164,7 +146,7 @@ export function ChatInput({
               size="sm"
               className="rounded-full gap-1.5"
             >
-              <currentModel.icon className="size-3.5" />
+              <Image src="/claude.png" alt="Claude" width={14} height={14} className="rounded-sm" />
               {currentModel.name}
               <ChevronDown className="size-3 opacity-50" />
             </Button>
@@ -177,7 +159,7 @@ export function ChatInput({
                   onClick={() => handleSelectModel(model.id)}
                   className="w-full flex items-start gap-3 p-2 rounded-lg hover:bg-muted transition-colors text-left"
                 >
-                  <model.icon className="size-4 mt-0.5 shrink-0" />
+                  <Image src="/claude.png" alt="Claude" width={16} height={16} className="rounded-sm mt-0.5 shrink-0" />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between">
                       <span className="text-sm font-medium">{model.name}</span>
@@ -195,60 +177,50 @@ export function ChatInput({
           </PopoverContent>
         </Popover>
 
-        {/* Selected Tools */}
-        {selectedTools.map((toolId) => {
-          const tool = TOOLS.find((t) => t.id === toolId)!;
-          return (
+        {/* Tools Selector */}
+        <Popover open={isToolsPopoverOpen} onOpenChange={setIsToolsPopoverOpen}>
+          <PopoverTrigger asChild>
             <Button
-              key={tool.id}
-              variant="secondary"
+              variant="outline"
               size="sm"
-              className="rounded-full gap-1.5 pr-1.5"
-              onClick={() => handleRemoveTool(tool.id)}
+              className="rounded-full gap-1.5"
             >
-              <tool.icon className="size-3.5" />
-              {tool.name}
-              <span className="ml-0.5 rounded-full hover:bg-muted-foreground/20 p-0.5">
-                <X className="size-3" />
-              </span>
+              <Image src="/logo.png" alt="Tools" width={14} height={14} className="rounded-sm" />
+              {getToolsLabel()}
+              <ChevronDown className="size-3 opacity-50" />
             </Button>
-          );
-        })}
-
-        {/* Add Tool Button */}
-        {availableTools.length > 0 && (
-          <Popover open={isToolPopoverOpen} onOpenChange={setIsToolPopoverOpen}>
-            <PopoverTrigger asChild>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="rounded-full gap-1.5 text-muted-foreground hover:text-foreground"
-              >
-                <Plus className="size-3.5" />
-                Add tool
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent align="start" className="w-64 p-2">
-              <div className="space-y-1">
-                {availableTools.map((tool) => (
+          </PopoverTrigger>
+          <PopoverContent align="start" className="w-72 p-2">
+            <div className="space-y-1">
+              {TOOLS.map((tool) => {
+                const isEnabled = enabledTools.includes(tool.id);
+                return (
                   <button
                     key={tool.id}
-                    onClick={() => handleSelectTool(tool.id)}
+                    onClick={() => handleToggleTool(tool.id)}
                     className="w-full flex items-start gap-3 p-2 rounded-lg hover:bg-muted transition-colors text-left"
                   >
-                    <tool.icon className="size-4 mt-0.5 shrink-0" />
+                    <div className={`mt-0.5 p-1 rounded ${isEnabled ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground"}`}>
+                      <tool.icon className="size-4" />
+                    </div>
                     <div className="flex-1 min-w-0">
-                      <span className="text-sm font-medium">{tool.name}</span>
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-medium">{tool.name}</span>
+                        {isEnabled && (
+                          <Check className="size-4 text-primary" />
+                        )}
+                      </div>
                       <p className="text-xs text-muted-foreground mt-0.5">
                         {tool.description}
                       </p>
                     </div>
                   </button>
-                ))}
-              </div>
-            </PopoverContent>
-          </Popover>
-        )}
+                );
+              })}
+            </div>
+          </PopoverContent>
+        </Popover>
+
       </div>
     </div>
   );

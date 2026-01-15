@@ -3,6 +3,7 @@ import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 const isPublicRoute = createRouteMatcher([
   "/sign-in(.*)",
   "/sign-up(.*)",
+  "/api/cron/(.*)", // Allow cron routes to bypass auth (they use CRON_SECRET)
 ]);
 
 export default clerkMiddleware(async (auth, request) => {
