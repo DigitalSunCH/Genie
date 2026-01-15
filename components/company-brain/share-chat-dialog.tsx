@@ -66,14 +66,14 @@ export function ShareChatDialog({
   const orgMembers = React.useMemo(() => {
     if (!memberships?.data || !currentUser) return [];
     return memberships.data
-      .filter((m) => m.publicUserData.userId !== currentUser.id)
+      .filter((m) => m.publicUserData && m.publicUserData.userId !== currentUser.id)
       .map((m) => ({
         id: m.id,
-        userId: m.publicUserData.userId || "",
-        firstName: m.publicUserData.firstName,
-        lastName: m.publicUserData.lastName,
-        imageUrl: m.publicUserData.imageUrl,
-        identifier: m.publicUserData.identifier,
+        userId: m.publicUserData?.userId || "",
+        firstName: m.publicUserData?.firstName ?? null,
+        lastName: m.publicUserData?.lastName ?? null,
+        imageUrl: m.publicUserData?.imageUrl,
+        identifier: m.publicUserData?.identifier || "",
       }));
   }, [memberships?.data, currentUser]);
 

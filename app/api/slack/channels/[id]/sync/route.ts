@@ -281,7 +281,7 @@ export async function POST(
         continue;
       }
 
-      const hasThread = msg.reply_count && msg.reply_count > 0;
+      const hasThread = (msg.reply_count ?? 0) > 0;
       const threadReplies = hasThread ? threadRepliesMap[msg.ts] || [] : [];
 
       let combinedText: string;

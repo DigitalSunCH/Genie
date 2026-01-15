@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { Suspense } from "react";
 import { Brain, MessageSquare, Inbox, RefreshCw } from "lucide-react";
 import { useOrganization } from "@clerk/nextjs";
 import { useSearchParams } from "next/navigation";
@@ -37,6 +38,14 @@ interface TldvMeeting {
 }
 
 export default function CompanyBrainPage() {
+  return (
+    <Suspense fallback={null}>
+      <CompanyBrainContent />
+    </Suspense>
+  );
+}
+
+function CompanyBrainContent() {
   const { organization } = useOrganization();
   const searchParams = useSearchParams();
   const [mounted, setMounted] = React.useState(false);

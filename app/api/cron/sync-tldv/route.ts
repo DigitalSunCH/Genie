@@ -74,7 +74,7 @@ export async function GET(request: Request) {
     }
 
     // Process each organization
-    for (const [orgId, emails] of Object.entries(emailsByOrg)) {
+    for (const [orgId, emails] of Object.entries(emailsByOrg) as [string, MonitoredEmail[]][]) {
       try {
         await processOrganization(orgId, emails, allMeetings, stats);
         stats.organizationsProcessed++;

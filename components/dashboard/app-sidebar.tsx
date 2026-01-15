@@ -1,5 +1,6 @@
 "use client";
 
+import { Suspense } from "react";
 import { useUser } from "@clerk/nextjs";
 import {
   Sidebar,
@@ -23,7 +24,9 @@ export function AppSidebar({
         <TeamSwitcher />
       </SidebarHeader>
       <SidebarContent>
-        <NavMain />
+        <Suspense fallback={null}>
+          <NavMain />
+        </Suspense>
       </SidebarContent>
       <SidebarFooter>
         <NavUser
