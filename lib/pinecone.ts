@@ -9,7 +9,11 @@ if (!apiKey) {
 export const pinecone = new Pinecone({ apiKey });
 
 // Index configuration - using same index for all company brain sources
-export const COMPANY_BRAIN_INDEX_NAME = "slack-dev";
+const indexName = process.env.PINECONE_INDEX_NAME;
+if (!indexName) {
+  throw new Error("PINECONE_INDEX_NAME environment variable is not set");
+}
+export const COMPANY_BRAIN_INDEX_NAME = indexName;
 export const SLACK_INDEX_NAME = COMPANY_BRAIN_INDEX_NAME; // Alias for backwards compatibility
 export const TEXT_FIELD = "text"; // Must match the fieldMap in index config
 export const SLACK_TEXT_FIELD = TEXT_FIELD; // Alias for backwards compatibility
